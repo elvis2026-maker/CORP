@@ -126,6 +126,7 @@ export default {
         }),
       });
     } catch (err) {
+      console.error('[elvis-gm-api] 呼叫 Gemini 時發生連線例外：', String(err));
       return new Response(JSON.stringify({ error: '連不上 Gemini，請稍後再試', detail: String(err) }), {
         status: 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -134,8 +135,12 @@ export default {
 
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
+      // 直接印出 Gemini 真正回傳的狀態碼與內容，方便從 Cloudflare Logs 一眼看出原因
+      // （常見：400 請求格式或模型名稱錯誤、403 金鑰無效或權限不足、404 模型不存在、
+      // 429 額度用完）
+      console.error(`[elvis-gm-api] Gemini 回傳 ${geminiRes.status}：${errText}`);
       return new Response(JSON.stringify({ error: 'Gemini 回傳錯誤', status: geminiRes.status, detail: errText }), {
-        status: geminiRes.status === 429 ? 429 : 502,
+        status: geminiRes.status, // 直接透傳 Gemini 的實際狀態碼，不再統一蓋成 502
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

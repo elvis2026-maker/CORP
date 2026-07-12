@@ -11,5 +11,5 @@ const APP_CONFIG = {
   //
   // 留空字串 "" 的話，總經理會用內建的展示回覆（前端模擬，不會呼叫任何
   // API），網站仍然可以正常展示，只是總經理不是真的在「想」。
-  GM_API_ENDPOINT: '',
+  GM_API_ENDPOINT: 'elvis-gm-api.elvis-liu2027.workers.dev'`
 };

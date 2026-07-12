@@ -120,6 +120,50 @@ document.querySelectorAll('[data-dept-target]').forEach(a => {
   });
 });
 
+// ---------------- V13：接上 Gemini API（透過您自己部署的 Cloudflare Worker）----------------
+// 這裡的邏輯是：如果 config.js 裡的 APP_CONFIG.GM_API_ENDPOINT 有填 Worker 網址，
+// 就真的呼叫 Gemini；沒填的話，自動退回原本前端展示用的固定回覆，網站永遠不會壞掉。
+// 對話記憶只存在瀏覽器分頁的這次工作階段（chatHistory 陣列），重新整理頁面會清空——
+// 要讓總經理記得「昨天講過的事」，需要後端資料庫，這是下一步的待辦事項。
+let chatHistory = [];
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function getGmReply(text, mediaType, imageFiles) {
+  const endpoint = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.GM_API_ENDPOINT) ? APP_CONFIG.GM_API_ENDPOINT.trim() : '';
+  const fallbackPool = mediaType ? (acksMedia[mediaType] || acks) : acks;
+
+  if (!endpoint) {
+    // 還沒設定 Worker 網址：沿用展示用的固定回覆，網站仍然完整可用
+    return fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
+  }
+
+  try {
+    const images = [];
+    for (const file of imageFiles) {
+      images.push({ mimeType: file.type || 'image/png', data: await fileToBase64(file) });
+    }
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, history: chatHistory, images }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data.reply || '（總經理這次沒有回覆內容，麻煩再問一次）';
+  } catch (err) {
+    console.error('呼叫總經理 API 失敗：', err);
+    return `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`;
+  }
+}
+
 // front-end only demo of the command loop — no API wired up yet
 const form = document.getElementById('consoleForm');
 const input = document.getElementById('consoleInput');
@@ -250,6 +294,7 @@ form.addEventListener('submit', (e) => {
       </div>`;
   });
   const mediaType = kinds.size === 0 ? null : (kinds.size > 1 ? 'mixed' : Array.from(kinds)[0]);
+  const pendingFilesSnapshot = pendingFiles.slice();
 
   log.insertAdjacentHTML('beforeend', `
     <div class="msg msg-user">
@@ -268,7 +313,8 @@ form.addEventListener('submit', (e) => {
   renderAttachPreview();
   log.scrollTop = log.scrollHeight;
 
-  // typing indicator — 小總正在輸入，讓對話更有「真人」感
+  // typing indicator — 小總正在輸入，讓對話更有「真人」感（真的接上 API 後，
+  // 這個動畫會一直顯示到 Gemini 真正回覆為止，時間長短取決於網路與模型速度）
   log.insertAdjacentHTML('beforeend', `
     <div class="msg msg-gm" id="typingRow">
       <span class="ava ava-gm ava-sm is-active" aria-hidden="true"><span class="ava-glyph">總</span></span>
@@ -279,9 +325,8 @@ form.addEventListener('submit', (e) => {
     </div>`);
   log.scrollTop = log.scrollHeight;
 
-  setTimeout(() => {
-    const pool = mediaType ? acksMedia[mediaType] : acks;
-    const reply = pool[Math.floor(Math.random() * pool.length)];
+  const imageFiles = pendingFilesSnapshot.filter(f => kindOf(f) === 'image');
+  getGmReply(text, mediaType, imageFiles).then(reply => {
     const typingRow = document.getElementById('typingRow');
     if (typingRow) typingRow.remove();
     log.insertAdjacentHTML('beforeend', `
@@ -294,7 +339,9 @@ form.addEventListener('submit', (e) => {
       </div>`);
     log.lastElementChild.querySelector('p').textContent = reply;
     log.scrollTop = log.scrollHeight;
-  }, 1100);
+    chatHistory.push({ role: 'user', text: text || '（附加了圖片／檔案，無文字）' });
+    chatHistory.push({ role: 'model', text: reply });
+  });
 });
 
 // ---------------- 招聘提案核准後，即時把新角色加入組織架構 ----------------

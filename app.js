@@ -127,6 +127,14 @@ document.querySelectorAll('[data-dept-target]').forEach(a => {
 // 要讓總經理記得「昨天講過的事」，需要後端資料庫，這是下一步的待辦事項。
 let chatHistory = [];
 
+// V20：待審批的核准／退回／加問動作跟總經理對話共用同一支 Worker，只是換一個路徑
+// （/approval-action、/approval-history）。這個小工具統一算出「Worker 網址去掉結尾斜線」，
+// 給對話與待審批兩處共用，避免各自算一次時漏掉或多算斜線。
+function apiBase() {
+  const raw = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.GM_API_ENDPOINT) ? APP_CONFIG.GM_API_ENDPOINT.trim() : '';
+  return raw.replace(/\/+$/, '');
+}
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -179,7 +187,7 @@ const MAX_ATTACH_BYTES = 10 * 1024 * 1024;       // 單一檔案 10MB
 const MAX_ATTACH_TOTAL_BYTES = 14 * 1024 * 1024; // 單次送出全部附件合計 14MB
 
 async function getGmReply(text, mediaType, files) {
-  const endpoint = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.GM_API_ENDPOINT) ? APP_CONFIG.GM_API_ENDPOINT.trim() : '';
+  const endpoint = apiBase();
   const fallbackPool = mediaType ? (acksMedia[mediaType] || acks) : acks;
 
   if (!endpoint) {
@@ -454,16 +462,110 @@ function refreshPendingCount(){
 }
 refreshPendingCount(); // 頁面載入時就同步一次，數字永遠等於實際卡片數，不用手動維護
 
+// ---------------- V20：待審批核准／退回／加問動作串接後端（Cloudflare KV）----------------
+// 跟總經理對話共用同一支 Worker，多開兩個路徑：
+//   POST {WORKER}/approval-action  → 寫入一筆批示紀錄（核准／退回／加問）
+//   GET  {WORKER}/approval-history → 讀出所有歷史批示紀錄，畫面重新整理後仍看得到
+// 如果 config.js 沒填 Worker 網址，或這次呼叫失敗（例如 Worker 還沒綁 KV），
+// 畫面上的核准／退回互動仍然完整可用，只是會誠實註明「這筆決定沒有成功存進後端」，
+// 不會讓您誤以為已經永久保存。
+const ACTION_LABEL = { approve: '✓ 核准', reject: '✕ 退回', ask: '… 加問' };
+
+async function submitApprovalDecision(cardId, caseTitle, action, resultNote) {
+  const base = apiBase();
+  if (!base) {
+    return { ok: false, reason: 'no-endpoint' };
+  }
+  try {
+    const res = await fetch(`${base}/approval-action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: cardId, caseTitle, action, note: resultNote || '' }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return { ok: true, record: data.record };
+  } catch (err) {
+    console.error('待審批核准/退回動作寫入後端失敗：', err);
+    return { ok: false, reason: 'request-failed', detail: String(err) };
+  }
+}
+
+function renderApprovalHistory(records) {
+  const list = document.getElementById('approvalHistoryList');
+  const status = document.getElementById('approvalHistoryStatus');
+  if (!list || !status) return;
+  if (!records.length) {
+    list.innerHTML = '';
+    status.textContent = '目前還沒有歷史批示紀錄，您核准／退回過的事項會顯示在這裡。';
+    status.classList.remove('is-error');
+    return;
+  }
+  list.innerHTML = records.map(r => {
+    const label = ACTION_LABEL[r.action] || r.action;
+    const cls = r.action === 'approve' ? 'act-approve' : (r.action === 'reject' ? 'act-reject' : 'act-ask');
+    const when = r.decidedAt ? new Date(r.decidedAt).toLocaleString('zh-TW', { hour12: false }) : '';
+    return `
+      <div class="approval-history-item ${cls}">
+        <span class="hist-badge">${label}</span>
+        <div class="hist-body">
+          <p class="hist-case">${(r.caseTitle || '（未命名事項）').replace(/</g, '&lt;')}</p>
+          <p class="hist-meta">${when}${r.note ? ' · ' + r.note.replace(/</g, '&lt;') : ''}</p>
+        </div>
+      </div>`;
+  }).join('');
+  status.textContent = `共 ${records.length} 筆紀錄（後端保存於 Cloudflare KV）`;
+  status.classList.remove('is-error');
+}
+
+async function loadApprovalHistory() {
+  const status = document.getElementById('approvalHistoryStatus');
+  const base = apiBase();
+  if (!base) {
+    if (status) {
+      status.textContent = '尚未設定 Worker 網址（config.js 的 GM_API_ENDPOINT 是空的），歷史批示紀錄無法讀取，目前的核准／退回只會顯示在畫面上，不會保存。';
+      status.classList.add('is-error');
+    }
+    return;
+  }
+  try {
+    const res = await fetch(`${base}/approval-history`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (data.error && (!data.records || !data.records.length)) {
+      // Worker 有回應，但 APPROVALS_KV 還沒綁定
+      if (status) {
+        status.textContent = `${data.error}（見 README「V20 設定方法」綁定 KV 的步驟）`;
+        status.classList.add('is-error');
+      }
+      return;
+    }
+    renderApprovalHistory(Array.isArray(data.records) ? data.records : []);
+  } catch (err) {
+    console.error('讀取歷史批示紀錄失敗：', err);
+    if (status) {
+      status.textContent = '目前連不上歷史批示紀錄服務，稍後重新整理頁面再試一次。';
+      status.classList.add('is-error');
+    }
+  }
+}
+loadApprovalHistory();
+
 document.querySelectorAll('.approval-actions button').forEach(btn => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     const card = document.getElementById(btn.dataset.target);
     if (!card || card.classList.contains('is-resolved')) return;
     const act = btn.dataset.act;
     const note = card.querySelector('.approval-resolved-note');
+    const caseTitle = card.querySelector('.approval-case')?.textContent?.trim() || card.id;
+
+    // 先鎖住卡片、按鈕，避免使用者連點造成重複送出
     card.classList.add('is-resolved');
     card.querySelectorAll('.approval-actions button').forEach(b => b.disabled = true);
+
+    let resultText = '';
     if (act === 'approve') {
-      note.textContent = '✓ 董事長已核准，總經理將繼續往下執行';
+      resultText = '董事長已核准，總經理將繼續往下執行';
       note.className = 'approval-resolved-note show ok';
       if (btn.dataset.target === 'ap-hire') {
         hireIntoOrg('bc-eng', {
@@ -472,16 +574,29 @@ document.querySelectorAll('.approval-actions button').forEach(btn => {
           nameEn: 'DevOps Engineer',
           fn: '負責部署流程與系統維運，監控服務穩定性，是董事長核准後新增的試營運角色，一個月後由總經理回報成效。'
         });
-        note.textContent = '✓ 董事長已核准，「DevOps 工程師（小維）」已加入工程部組織架構';
+        resultText = '董事長已核准，「DevOps 工程師（小維）」已加入工程部組織架構';
       }
     } else if (act === 'reject') {
-      note.textContent = '✕ 已退回，總經理會請部門重新提案';
+      resultText = '已退回，總經理會請部門重新提案';
       note.className = 'approval-resolved-note show no';
     } else {
-      note.textContent = '… 已請總經理補充更多資訊，稍後回到這裡';
+      resultText = '已請總經理補充更多資訊，稍後回到這裡';
       note.className = 'approval-resolved-note show';
       note.style.color = 'var(--ink-faint)';
     }
+    note.textContent = (act === 'approve' ? '✓ ' : act === 'reject' ? '✕ ' : '… ') + resultText + '（寫入後端中…）';
+
+    const outcome = await submitApprovalDecision(card.id, caseTitle, act, resultText);
+    const prefix = act === 'approve' ? '✓ ' : act === 'reject' ? '✕ ' : '… ';
+    if (outcome.ok) {
+      note.textContent = prefix + resultText + '（已存入後端歷史紀錄）';
+      loadApprovalHistory(); // 重新拉一次，馬上看到剛剛這筆
+    } else if (outcome.reason === 'no-endpoint') {
+      note.textContent = prefix + resultText + '（尚未設定後端 Worker 網址，這筆決定只顯示在畫面上，不會保存）';
+    } else {
+      note.textContent = prefix + resultText + '（寫入後端失敗，這筆決定暫時只顯示在畫面上，請稍後重新整理頁面再試一次）';
+    }
+
     pendingCount = Math.max(0, pendingCount - 1);
     refreshPendingCount();
   });

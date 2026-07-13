@@ -617,6 +617,13 @@
   .approval-history{margin-top:26px; padding-top:20px; border-top:1px dashed var(--line-strong);}
   .approval-history-title{font-family:"Noto Serif TC",serif; font-weight:700; font-size:14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
   .approval-history-list{display:flex; flex-direction:column; gap:8px; margin-top:12px;}
+  /* V21：展開後限制最大高度、超出用內部捲動，紀錄再多也不會把整個頁面撐長 */
+  .approval-history-list.is-expanded{max-height:440px; overflow-y:auto; padding-right:6px;}
+  .approval-history-toggle{
+    margin-top:10px; font-size:12px; font-weight:700; color:var(--violet);
+    background:none; border:none; padding:0; cursor:pointer; font-family:inherit;
+  }
+  .approval-history-toggle:hover{text-decoration:underline;}
   .approval-history-item{
     display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border-radius:9px;
     background:var(--bg-soft, #f6f7fb); border:1px solid var(--line); font-size:12px; line-height:1.6;

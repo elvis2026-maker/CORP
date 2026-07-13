@@ -471,6 +471,14 @@ refreshPendingCount(); // 頁面載入時就同步一次，數字永遠等於實
 // 不會讓您誤以為已經永久保存。
 const ACTION_LABEL = { approve: '✓ 核准', reject: '✕ 退回', ask: '… 加問' };
 
+// V21：歷史批示紀錄平時只顯示最近幾筆，避免清單越拉越長把公文夾撐得很高；
+// 累積比較多筆之後，點「展開全部」才會看到完整清單（後端最多回傳最新 100 筆，
+// 展開後的清單本身也有捲動高度上限，不會無止盡撐開整個頁面，見 styles.css
+// 的 .approval-history-list.is-expanded）。
+const APPROVAL_HISTORY_COLLAPSE_COUNT = 8;
+let approvalHistoryExpanded = false;
+let approvalHistoryRecordsCache = [];
+
 async function submitApprovalDecision(cardId, caseTitle, action, resultNote) {
   const base = apiBase();
   if (!base) {
@@ -492,16 +500,21 @@ async function submitApprovalDecision(cardId, caseTitle, action, resultNote) {
 }
 
 function renderApprovalHistory(records) {
+  approvalHistoryRecordsCache = records;
   const list = document.getElementById('approvalHistoryList');
   const status = document.getElementById('approvalHistoryStatus');
+  const toggleBtn = document.getElementById('approvalHistoryToggle');
   if (!list || !status) return;
   if (!records.length) {
     list.innerHTML = '';
+    list.classList.remove('is-expanded');
     status.textContent = '目前還沒有歷史批示紀錄，您核准／退回過的事項會顯示在這裡。';
     status.classList.remove('is-error');
+    if (toggleBtn) toggleBtn.hidden = true;
     return;
   }
-  list.innerHTML = records.map(r => {
+  const visible = approvalHistoryExpanded ? records : records.slice(0, APPROVAL_HISTORY_COLLAPSE_COUNT);
+  list.innerHTML = visible.map(r => {
     const label = ACTION_LABEL[r.action] || r.action;
     const cls = r.action === 'approve' ? 'act-approve' : (r.action === 'reject' ? 'act-reject' : 'act-ask');
     const when = r.decidedAt ? new Date(r.decidedAt).toLocaleString('zh-TW', { hour12: false }) : '';
@@ -514,8 +527,58 @@ function renderApprovalHistory(records) {
         </div>
       </div>`;
   }).join('');
-  status.textContent = `共 ${records.length} 筆紀錄（後端保存於 Cloudflare KV）`;
+  list.classList.toggle('is-expanded', approvalHistoryExpanded);
+  const cappedNote = records.length >= 100 ? '（僅顯示最新 100 筆，更早的紀錄仍完整保存在 Cloudflare KV，只是這裡不列出）' : '';
+  status.textContent = `共 ${records.length} 筆紀錄${cappedNote}（後端保存於 Cloudflare KV）`;
   status.classList.remove('is-error');
+  if (toggleBtn) {
+    if (records.length > APPROVAL_HISTORY_COLLAPSE_COUNT) {
+      toggleBtn.hidden = false;
+      toggleBtn.textContent = approvalHistoryExpanded ? '只看最近幾筆 ▲' : `展開全部 ${records.length} 筆 ▼`;
+    } else {
+      toggleBtn.hidden = true;
+    }
+  }
+}
+
+document.getElementById('approvalHistoryToggle')?.addEventListener('click', () => {
+  approvalHistoryExpanded = !approvalHistoryExpanded;
+  renderApprovalHistory(approvalHistoryRecordsCache);
+});
+
+// V21：修正「核准／退回後重新整理頁面，卡片又變回待核准」的問題。
+// 原因：待審批卡片本身是 index.html 裡固定的示範內容，每次重新整理頁面都會
+// 回到最初「待核准」的樣子；V20 只把決定寫進了 KV、也把歷史紀錄讀了回來，
+// 但沒有拿讀回來的歷史紀錄去比對、更新卡片本身的狀態，所以卡片畫面沒有跟著
+// 「復原」，數字（待審批 3）也一直沒扣掉已經處理過的。這裡在讀到歷史紀錄後，
+// 用卡片 id 對照，把已經有決定紀錄的卡片直接標記成已處理（鎖住按鈕、顯示
+// 當初的決定內容），行為等同您剛剛才按過一次。
+// 老實說清楚這裡的範圍：卡片內容本身仍是固定示範資料（跟部門看板、交付中心
+// 一樣還沒接上真實任務資料庫），這裡修的只是「已經有決定紀錄的卡片，重新整理
+// 後畫面要跟後端資料一致」，不是把整個待審批清單改成動態產生。
+function applyHistoryToCards(records) {
+  const latestByCard = {};
+  for (const r of records) {
+    if (r && r.id && !(r.id in latestByCard)) latestByCard[r.id] = r; // records 已由新到舊排序，第一筆就是最新的
+  }
+  Object.values(latestByCard).forEach(r => {
+    const card = document.getElementById(r.id);
+    if (!card || !card.classList.contains('approval-card') || card.classList.contains('is-resolved')) return;
+    card.classList.add('is-resolved');
+    card.querySelectorAll('.approval-actions button').forEach(b => b.disabled = true);
+    const note = card.querySelector('.approval-resolved-note');
+    if (note) {
+      const okCls = r.action === 'approve' ? 'ok' : (r.action === 'reject' ? 'no' : '');
+      note.className = 'approval-resolved-note show' + (okCls ? ' ' + okCls : '');
+      if (!okCls) note.style.color = 'var(--ink-faint)';
+      const prefix = r.action === 'approve' ? '✓ ' : r.action === 'reject' ? '✕ ' : '… ';
+      const when = r.decidedAt ? new Date(r.decidedAt).toLocaleString('zh-TW', { hour12: false }) : '';
+      note.textContent = `${prefix}${r.note || ACTION_LABEL[r.action] || r.action}（已存入後端歷史紀錄・${when}）`;
+    }
+  });
+  // 卡片狀態可能被上面改動，重新算一次「待您核准」的實際數字，不能再假設每張卡片都還沒處理
+  pendingCount = document.querySelectorAll('.approval-card:not(.is-resolved)').length;
+  refreshPendingCount();
 }
 
 async function loadApprovalHistory() {
@@ -540,7 +603,9 @@ async function loadApprovalHistory() {
       }
       return;
     }
-    renderApprovalHistory(Array.isArray(data.records) ? data.records : []);
+    const records = Array.isArray(data.records) ? data.records : [];
+    renderApprovalHistory(records);
+    applyHistoryToCards(records);
   } catch (err) {
     console.error('讀取歷史批示紀錄失敗：', err);
     if (status) {

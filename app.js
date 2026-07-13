@@ -141,8 +141,8 @@ async function getGmReply(text, mediaType, imageFiles) {
   const fallbackPool = mediaType ? (acksMedia[mediaType] || acks) : acks;
 
   if (!endpoint) {
-    // 還沒設定 Worker 網址：沿用展示用的固定回覆，網站仍然完整可用
-    return fallbackPool[Math.floor(Math.random() * fallbackPool.length)];
+    // 還沒設定 Worker 網址：沿用展示用的固定回覆，網站仍然完整可用（示範回覆不附風險標示）
+    return { text: fallbackPool[Math.floor(Math.random() * fallbackPool.length)], risk: null };
   }
 
   try {
@@ -157,12 +157,17 @@ async function getGmReply(text, mediaType, imageFiles) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    return data.reply || '（總經理這次沒有回覆內容，麻煩再問一次）';
+    return {
+      text: data.reply || '（總經理這次沒有回覆內容，麻煩再問一次）',
+      risk: (data.risk && data.risk.level && data.risk.reason) ? data.risk : null,
+    };
   } catch (err) {
     console.error('呼叫總經理 API 失敗：', err);
-    return `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`;
+    return { text: `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`, risk: null };
   }
 }
+
+const RISK_LABEL = { low: '低風險', mid: '中風險', high: '高風險' };
 
 // front-end only demo of the command loop — no API wired up yet
 const form = document.getElementById('consoleForm');
@@ -326,21 +331,25 @@ form.addEventListener('submit', (e) => {
   log.scrollTop = log.scrollHeight;
 
   const imageFiles = pendingFilesSnapshot.filter(f => kindOf(f) === 'image');
-  getGmReply(text, mediaType, imageFiles).then(reply => {
+  getGmReply(text, mediaType, imageFiles).then(result => {
     const typingRow = document.getElementById('typingRow');
     if (typingRow) typingRow.remove();
+    const riskBadge = result.risk
+      ? `<span class="risk risk-${result.risk.level}" title="${result.risk.reason.replace(/"/g,'&quot;')}">${RISK_LABEL[result.risk.level] || '風險'}</span> `
+      : '';
     log.insertAdjacentHTML('beforeend', `
       <div class="msg msg-gm">
         <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
         <div class="msg-body">
           <span class="msg-role">總經理 · 小總</span>
-          <p></p>
+          <p>${riskBadge}<span class="gm-reply-text"></span></p>
+          ${result.risk ? `<p class="gm-risk-reason">風控官（小控）：${result.risk.reason.replace(/</g,'&lt;')}</p>` : ''}
         </div>
       </div>`);
-    log.lastElementChild.querySelector('p').textContent = reply;
+    log.lastElementChild.querySelector('.gm-reply-text').textContent = result.text;
     log.scrollTop = log.scrollHeight;
     chatHistory.push({ role: 'user', text: text || '（附加了圖片／檔案，無文字）' });
-    chatHistory.push({ role: 'model', text: reply });
+    chatHistory.push({ role: 'model', text: result.text });
   });
 });
 

@@ -176,6 +176,10 @@
   .risk-low{color:var(--risk-low); background:var(--risk-low-bg);}
   .risk-mid{color:var(--risk-mid); background:var(--risk-mid-bg);}
   .risk-high{color:var(--risk-high); background:var(--risk-high-bg);}
+  .msg-gm p.gm-risk-reason{
+    margin-top:6px; font-size:11.5px; color:var(--ink-faint); line-height:1.6;
+    background:none; border:none; padding:0;
+  }
 
   .console-input{display:flex; gap:8px; padding:14px 18px; border-top:1px solid var(--line);}
   .console-input input{

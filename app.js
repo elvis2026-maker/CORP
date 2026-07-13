@@ -136,34 +136,88 @@ function fileToBase64(file) {
   });
 }
 
-async function getGmReply(text, mediaType, imageFiles) {
+// ---------------- V18：圖片／影片／一般檔案都實際送進 Gemini 解析 ----------------
+// V13 只有圖片會轉成 base64 送出，影片與一般檔案這一版之前只是前端預覽、不會被
+// AI 讀到。這一版把三種附件都轉成 base64 送給 Worker，由 Worker 判斷 Gemini
+// 支不支援這個檔案格式（圖片／影片／音訊／PDF／純文字與程式碼都支援，Gemini 會
+// 真的讀取內容）；不支援的二進位格式（例如 zip、docx、xlsx）Worker 不會硬塞給
+// Gemini（塞了也讀不懂、容易產生幻覺內容），而是讓總經理老實回覆「有這個檔案，
+// 但目前看不懂內容」，不會假裝已經讀過。
+//
+// 瀏覽器原生的 file.type 常常抓不到（尤其 .py／.md／.yml 這類程式碼與文字檔，
+// 很多瀏覽器完全不會給 type），先用副檔名對照表補齊，Worker 那邊才有正確的
+// mimeType 可以判斷要不要送進 Gemini。
+const EXT_MIME_MAP = {
+  // 圖片
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif',
+  webp: 'image/webp', heic: 'image/heic', heif: 'image/heif',
+  // 影片
+  mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', avi: 'video/x-msvideo',
+  wmv: 'video/x-ms-wmv', flv: 'video/x-flv', mpeg: 'video/mpeg', mpg: 'video/mpeg', '3gp': 'video/3gpp',
+  // 音訊
+  mp3: 'audio/mpeg', wav: 'audio/wav', aac: 'audio/aac', ogg: 'audio/ogg', flac: 'audio/flac',
+  m4a: 'audio/mp4', aiff: 'audio/aiff',
+  // 文件／純文字／程式碼（Gemini 可直接讀懂內容的格式）
+  pdf: 'application/pdf', txt: 'text/plain', md: 'text/markdown', csv: 'text/csv',
+  json: 'application/json', xml: 'text/xml', html: 'text/html', htm: 'text/html', css: 'text/css',
+  js: 'text/javascript', mjs: 'text/javascript', ts: 'text/plain', jsx: 'text/plain', tsx: 'text/plain',
+  py: 'text/x-python', java: 'text/x-java-source', c: 'text/plain', cpp: 'text/plain', h: 'text/plain',
+  go: 'text/plain', rs: 'text/plain', rb: 'text/plain', php: 'text/plain', sh: 'text/plain',
+  yml: 'text/plain', yaml: 'text/plain', sql: 'text/plain', log: 'text/plain', rtf: 'application/rtf',
+};
+function resolveMimeType(file) {
+  if (file.type) return file.type;
+  const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+  return EXT_MIME_MAP[ext] || 'application/octet-stream';
+}
+
+// 單一檔案與單次送出的附件總大小上限（以原始檔案大小計算）。Gemini 的 inline
+// data 整體請求大約 20MB 上限，base64 編碼後體積會膨脹約 1.37 倍，這裡抓得比較
+// 保守。超過上限的附件仍會留在對話畫面上給您看，只是不會送進 AI 解析，會在總
+// 經理回覆下方誠實跟您說一聲，不會悄悄漏掉。
+const MAX_ATTACH_BYTES = 10 * 1024 * 1024;       // 單一檔案 10MB
+const MAX_ATTACH_TOTAL_BYTES = 14 * 1024 * 1024; // 單次送出全部附件合計 14MB
+
+async function getGmReply(text, mediaType, files) {
   const endpoint = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.GM_API_ENDPOINT) ? APP_CONFIG.GM_API_ENDPOINT.trim() : '';
   const fallbackPool = mediaType ? (acksMedia[mediaType] || acks) : acks;
 
   if (!endpoint) {
     // 還沒設定 Worker 網址：沿用展示用的固定回覆，網站仍然完整可用（示範回覆不附風險標示）
-    return { text: fallbackPool[Math.floor(Math.random() * fallbackPool.length)], risk: null };
+    return { text: fallbackPool[Math.floor(Math.random() * fallbackPool.length)], risk: null, skipped: [] };
   }
 
   try {
-    const images = [];
-    for (const file of imageFiles) {
-      images.push({ mimeType: file.type || 'image/png', data: await fileToBase64(file) });
+    const attachments = [];
+    const skipped = [];
+    let totalBytes = 0;
+    for (const file of files) {
+      if (file.size > MAX_ATTACH_BYTES || totalBytes + file.size > MAX_ATTACH_TOTAL_BYTES) {
+        skipped.push(file.name);
+        continue;
+      }
+      totalBytes += file.size;
+      attachments.push({
+        mimeType: resolveMimeType(file),
+        name: file.name,
+        data: await fileToBase64(file),
+      });
     }
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, history: chatHistory, images }),
+      body: JSON.stringify({ message: text, history: chatHistory, attachments }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     return {
       text: data.reply || '（總經理這次沒有回覆內容，麻煩再問一次）',
       risk: (data.risk && data.risk.level && data.risk.reason) ? data.risk : null,
+      skipped,
     };
   } catch (err) {
     console.error('呼叫總經理 API 失敗：', err);
-    return { text: `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`, risk: null };
+    return { text: `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`, risk: null, skipped: [] };
   }
 }
 
@@ -330,12 +384,14 @@ form.addEventListener('submit', (e) => {
     </div>`);
   log.scrollTop = log.scrollHeight;
 
-  const imageFiles = pendingFilesSnapshot.filter(f => kindOf(f) === 'image');
-  getGmReply(text, mediaType, imageFiles).then(result => {
+  getGmReply(text, mediaType, pendingFilesSnapshot).then(result => {
     const typingRow = document.getElementById('typingRow');
     if (typingRow) typingRow.remove();
     const riskBadge = result.risk
       ? `<span class="risk risk-${result.risk.level}" title="${result.risk.reason.replace(/"/g,'&quot;')}">${RISK_LABEL[result.risk.level] || '風險'}</span> `
+      : '';
+    const skippedNote = (result.skipped && result.skipped.length)
+      ? `<p class="gm-attach-note">附註：其中 ${result.skipped.length} 份附件超過單檔 10MB 或總量 14MB 上限，這次沒有送進 AI 解析，僅保留在對話畫面中：${result.skipped.map(n => n.replace(/</g,'&lt;')).join('、')}</p>`
       : '';
     log.insertAdjacentHTML('beforeend', `
       <div class="msg msg-gm">
@@ -344,11 +400,12 @@ form.addEventListener('submit', (e) => {
           <span class="msg-role">總經理 · 小總</span>
           <p>${riskBadge}<span class="gm-reply-text"></span></p>
           ${result.risk ? `<p class="gm-risk-reason">風控官（小控）：${result.risk.reason.replace(/</g,'&lt;')}</p>` : ''}
+          ${skippedNote}
         </div>
       </div>`);
     log.lastElementChild.querySelector('.gm-reply-text').textContent = result.text;
     log.scrollTop = log.scrollHeight;
-    chatHistory.push({ role: 'user', text: text || '（附加了圖片／檔案，無文字）' });
+    chatHistory.push({ role: 'user', text: text || '（附加了圖片／影片／檔案，無文字）' });
     chatHistory.push({ role: 'model', text: result.text });
   });
 });

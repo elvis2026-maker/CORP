@@ -9,11 +9,11 @@
 // 部署步驟請看 README.md「V13 設定方法」那一節，這裡只放程式碼。
 // ============================================================
 
-// 這裡用「gemini-2.5-flash」，是 2026 年中目前穩定、且在免費方案
+// 這裡用「gemini-1.5-flash」，是 2026 年中目前穩定、且在免費方案
 // 內可用的模型。如果之後 Google 又調整了免費方案名單，去
 // Google AI Studio（https://aistudio.google.com）的價格頁確認
 // 目前免費的模型名稱，改這一行就好。
-const GEMINI_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = 'gemini-1.5-flash';
 
 // 總經理的人設。可以直接改這段文字調整語氣或補充公司資訊，
 // 不需要動下面的程式邏輯。

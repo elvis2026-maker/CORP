@@ -204,86 +204,7 @@
 
       <div class="ws-block" id="delivery">
         <p class="ws-block-title">交付中心・已完成的成品與 Demo <span class="ws-block-note">可以直接點連結看 Demo，也可以下載完整檔案包</span></p>
-        <div class="delivery-grid">
-
-        <div class="delivery-card">
-          <div class="delivery-thumb tb-eng">
-            <span class="ava ava-eng" aria-hidden="true"><span class="ava-glyph">工</span></span>
-            <span class="ava ava-design" aria-hidden="true"><span class="ava-glyph">設</span></span>
-          </div>
-          <div class="delivery-body">
-            <p class="delivery-name">網站改版案 · 首頁 MVP</p>
-            <p class="delivery-desc">工程部（小工）＋設計部（小設）產出，首頁與報價頁已可互動瀏覽。</p>
-            <div class="delivery-meta-row">
-              <span class="delivery-badge verified">✓ 小質已驗收</span>
-              <span class="delivery-version">v1.2</span>
-              <span class="delivery-time">2 小時前</span>
-            </div>
-            <div class="delivery-actions">
-              <a class="btn-preview" href="#" onclick="return false;" title="示範版本尚未串接真實網址">看 Demo</a>
-              <a class="btn-download" href="#" onclick="return false;" title="示範版本尚未串接真實檔案">下載檔案包</a>
-            </div>
-          </div>
-        </div>
-
-        <div class="delivery-card">
-          <div class="delivery-thumb tb-design">
-            <span class="ava ava-design" aria-hidden="true"><span class="ava-glyph">設</span></span>
-          </div>
-          <div class="delivery-body">
-            <p class="delivery-name">品牌 LOGO 提案 v2</p>
-            <p class="delivery-desc">配色設計師（小色）依董事長裁示的深色系方向重新出稿，共 3 款。</p>
-            <div class="delivery-meta-row">
-              <span class="delivery-badge pending">待小質複核</span>
-              <span class="delivery-version">v2.0</span>
-              <span class="delivery-time">昨日 18:20</span>
-            </div>
-            <div class="delivery-actions">
-              <a class="btn-preview" href="#" onclick="return false;" title="示範版本尚未串接真實網址">看 Demo</a>
-              <a class="btn-download" href="#" onclick="return false;" title="示範版本尚未串接真實檔案">下載檔案包</a>
-            </div>
-          </div>
-        </div>
-
-        <div class="delivery-card">
-          <div class="delivery-thumb tb-product">
-            <span class="ava ava-product" aria-hidden="true"><span class="ava-glyph">品</span></span>
-          </div>
-          <div class="delivery-body">
-            <p class="delivery-name">會員訂閱制・可點擊原型</p>
-            <p class="delivery-desc">產品代理人 C（小快）用最小成本做出的可驗證流程原型。</p>
-            <div class="delivery-meta-row">
-              <span class="delivery-badge verified">✓ 小質已驗收</span>
-              <span class="delivery-version">v0.9</span>
-              <span class="delivery-time">3 天前</span>
-            </div>
-            <div class="delivery-actions">
-              <a class="btn-preview" href="#" onclick="return false;" title="示範版本尚未串接真實網址">看 Demo</a>
-              <a class="btn-download" href="#" onclick="return false;" title="示範版本尚未串接真實檔案">下載檔案包</a>
-            </div>
-          </div>
-        </div>
-
-        <div class="delivery-card">
-          <div class="delivery-thumb tb-growth">
-            <span class="ava ava-growth" aria-hidden="true"><span class="ava-glyph">銷</span></span>
-          </div>
-          <div class="delivery-body">
-            <p class="delivery-name">本週成長行銷週報</p>
-            <p class="delivery-desc">流量分析師（小流）＋ SEO 分析師（小析）彙整的完整週報 PDF。</p>
-            <div class="delivery-meta-row">
-              <span class="delivery-badge verified">✓ 小質已驗收</span>
-              <span class="delivery-version">Week 28</span>
-              <span class="delivery-time">今日 09:10</span>
-            </div>
-            <div class="delivery-actions">
-              <a class="btn-preview" href="#" onclick="return false;" title="示範版本尚未串接真實網址">看 Demo</a>
-              <a class="btn-download" href="#" onclick="return false;" title="示範版本尚未串接真實檔案">下載檔案包</a>
-            </div>
-          </div>
-        </div>
-
-      </div>
+        <div class="delivery-grid" id="deliveryGrid"></div>
       </div>
     </section>
 
@@ -309,6 +230,7 @@
           <span><span class="stat-dot s-off"></span>離線</span>
           <span style="margin-left:auto; color:var(--ink-faint);">點卡片展開部門討論紀錄</span>
         </p>
+        <p class="board-sync-status" id="boardSyncStatus">載入中…</p>
       </div>
 
       <div class="board-grid" id="boardGrid">
@@ -379,7 +301,7 @@
 
   <footer class="site-footer">
     <div class="plate">Elvis 程式設計 <span>· 艾維斯資訊 IT 顧問</span></div>
-    <div class="meta"><span>V23.0</span><span>2026.07.13</span></div>
+    <div class="meta"><span>V24.0</span><span>2026.07.13</span></div>
   </footer>
 
   <!-- shared gradient definition -->
@@ -394,6 +316,7 @@
 
   <script src="config.js"></script>
   <script src="org-data.js"></script>
+  <script src="delivery-data.js"></script>
   <script src="app.js"></script>
 
 </body>

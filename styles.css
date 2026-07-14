@@ -447,12 +447,6 @@
   .bc-task{font-size:12.5px; color:var(--ink-soft); margin-top:10px; line-height:1.65;}
   .bc-task b{color:var(--ink); font-weight:600;}
   .bc-meta{display:flex; justify-content:space-between; font-size:10.5px; color:var(--ink-faint); margin-top:9px;}
-  .bc-source{
-    font-size:10px; color:var(--ink-faint); margin-top:6px; font-style:italic;
-  }
-  .bc-source.is-real{
-    color:var(--risk-low); font-style:normal; font-weight:600;
-  }
   .bc-bar{height:5px; border-radius:99px; background:var(--paper); border:1px solid var(--line); margin-top:6px; overflow:hidden;}
   .bc-bar-fill{height:100%; background:var(--gm); border-radius:99px;}
 
@@ -507,10 +501,10 @@
   .ava-qa{background:linear-gradient(135deg,#8B5CF6,#6D28D9);}
   .ava-chairman{background:linear-gradient(135deg,#0F172A,#334155);}
 
-  .tb-eng{background:linear-gradient(135deg,#2563EB,#1D4ED8);}
-  .tb-design{background:linear-gradient(135deg,#14B8A6,#0F766E);}
-  .tb-product{background:linear-gradient(135deg,#0EA5E9,#0369A1);}
-  .tb-growth{background:linear-gradient(135deg,#22D3EE,#0891B2);}
+  /* V24：原本這裡有 .tb-eng／.tb-design／.tb-product／.tb-growth 四個專門給交付
+     中心縮圖用的背景色，內容其實跟上面 .ava-eng 等部門漸層一模一樣，只是多存一份。
+     renderDelivery() 改成直接把部門自己的 avaClass 套在縮圖上，同一個顏色只在一個
+     地方維護，這四個 class 已經沒有任何地方在用，直接拿掉。 */
 
   /* department nickname badges next to name */
   .bc-nick,.dept-nick-org,.light-nick{
@@ -661,6 +655,12 @@
   .approval-history-item .hist-meta{color:var(--ink-faint); font-size:11px; margin-top:2px;}
   .approval-history-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
   .approval-history-status.is-error{color:var(--risk-high);}
+  .board-sync-status{margin-top:8px; font-size:11px; color:var(--ink-faint);}
+  .board-sync-status.is-error{color:var(--risk-high);}
+  .bc-demo-tag{
+    margin-left:6px; font-style:normal; color:var(--ink-faint);
+    border:1px solid var(--line-strong); border-radius:999px; padding:1px 7px; font-size:9.5px;
+  }
 
   /* ---------- V6: 交付中心 Delivery Center ---------- */
   .delivery{padding:30px 0 6px;}
@@ -699,6 +699,14 @@
   .btn-preview:hover{opacity:.9;}
   .btn-download{background:var(--paper); color:var(--ink-soft); border:1px solid var(--line-strong);}
   .btn-download:hover{border-color:var(--violet); color:var(--violet);}
+
+  /* V24：交付中心尚未有真實網址／檔案時的鎖定狀態，跟正常按鈕明顯區隔，
+     滑鼠移過去的提示文字會誠實說明原因，不會讓人誤以為連結壞掉 */
+  .delivery-actions button.is-disabled{
+    background:var(--paper); color:var(--ink-faint); border:1px solid var(--line);
+    cursor:not-allowed; opacity:.75;
+  }
+  .delivery-actions button.is-disabled:hover{opacity:.75; border-color:var(--line); color:var(--ink-faint);}
 
   /* ---------- V6: 通用檔案附件（非圖片／影片） ---------- */
   .file-chip{

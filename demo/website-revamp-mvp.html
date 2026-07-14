@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>網站改版案・首頁 MVP（示範 Demo）</title>
+<style>
+  :root{
+    --paper:#FBFAF6; --card:#fff; --ink:#201C2C; --ink-soft:#5C5770; --ink-faint:#8B87A0;
+    --violet:#5A3A96; --indigo:#2E4E93; --line:#E7E2D6;
+    --gm:linear-gradient(135deg,var(--violet),var(--indigo));
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:"Noto Sans TC",sans-serif; line-height:1.7;}
+  .banner{
+    background:#FBF1DF; color:#8A5A12; font-size:13px; text-align:center; padding:10px 16px;
+    border-bottom:1px solid #EADFC2;
+  }
+  header{padding:64px 20px 48px; text-align:center; background:var(--gm); color:#fff;}
+  header h1{margin:0 0 10px; font-size:clamp(22px,5vw,34px);}
+  header p{margin:0; opacity:.85; font-size:14px;}
+  main{max-width:760px; margin:0 auto; padding:36px 20px 60px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:24px; margin-bottom:16px; box-shadow:0 12px 32px -18px rgba(32,28,44,.18);}
+  .card h2{margin:0 0 8px; font-size:16px;}
+  .card p{margin:0; color:var(--ink-soft); font-size:13.5px;}
+  .quote-box{display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+  .price{font-family:"Noto Serif TC",serif; font-weight:700; font-size:26px; color:var(--violet);}
+  .btn{display:inline-block; margin-top:14px; padding:11px 22px; border-radius:10px; background:var(--gm); color:#fff; text-decoration:none; font-size:13.5px; font-weight:600;}
+  footer{text-align:center; padding:24px; font-size:11.5px; color:var(--ink-faint);}
+</style>
+</head>
+<body>
+  <div class="banner">⚠️ 這是「交付中心」的示範 Demo 頁面，不是真實客戶專案。等真實案子完成後，把這個檔案換成真正的成品，並更新 delivery-data.js 的 demoUrl 即可。</div>
+
+  <header>
+    <h1>某某企業官網改版</h1>
+    <p>工程部（小工）＋設計部（小設）· 首頁與報價頁互動預覽</p>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>首頁重點區塊</h2>
+      <p>這裡會放公司主打服務、核心優勢、精選案例——實際案子完成後，這一頁就是可以直接傳給客戶看的成品預覽，不需要客戶另外安裝任何東西，開瀏覽器就能看。</p>
+    </div>
+
+    <div class="card quote-box">
+      <div>
+        <h2>改版報價試算</h2>
+        <p>依實際需求範圍浮動</p>
+      </div>
+      <div>
+        <div class="price">NT$ 150,000 起</div>
+        <a class="btn" href="#" onclick="alert('這是示範頁面，尚未串接真實表單。'); return false;">索取正式報價單</a>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>關於這個示範</h2>
+      <p>這份頁面是艾維斯萬能事務所「交付中心」串接真實連結機制的示範範例——目的是證明「看 Demo」按鈕點下去，是真的連到一個存在的網頁，不是 <code>href="#"</code> 的假連結。實際交付真正的客戶專案時，請直接把這個檔案換成真正的成品頁面。</p>
+    </div>
+  </main>
+
+  <footer>Elvis 程式設計 · 艾維斯萬能事務所 董事長指揮中心 — 交付中心示範頁面</footer>
+</body>
+</html>

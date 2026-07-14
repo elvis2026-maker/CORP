@@ -708,6 +708,50 @@
   }
   .delivery-actions button.is-disabled:hover{opacity:.75; border-color:var(--line); color:var(--ink-faint);}
 
+  /* V31：交付中心串接 Cloudflare R2 後新增的畫面元素 */
+  .delivery-sync-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
+  .delivery-sync-status.is-error{color:var(--risk-high);}
+  .delivery-demo-tag{margin-left:6px;}
+
+  .delivery-upload-panel{margin-top:18px; border-top:1px dashed var(--line-strong); padding-top:16px;}
+  .delivery-upload-panel summary{
+    cursor:pointer; font-size:12.5px; font-weight:600; color:var(--violet); list-style:none;
+  }
+  .delivery-upload-panel summary::-webkit-details-marker{display:none;}
+  .delivery-upload-form{
+    margin-top:14px; display:flex; flex-direction:column; gap:12px;
+    background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px;
+  }
+  .delivery-field{display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--ink-soft); font-weight:600;}
+  .delivery-field input[type="text"],
+  .delivery-field input[type="file"],
+  .delivery-field textarea{
+    font-family:inherit; font-size:12.5px; color:var(--ink); background:var(--card);
+    border:1px solid var(--line-strong); border-radius:9px; padding:8px 10px; resize:vertical;
+  }
+  .delivery-field input[type="text"]:focus,
+  .delivery-field textarea:focus{outline:none; border-color:var(--violet);}
+  .delivery-contrib-list{display:flex; flex-wrap:wrap; gap:8px;}
+  .delivery-contrib-chip{
+    display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:500;
+    color:var(--ink-soft); background:var(--card); border:1px solid var(--line-strong);
+    border-radius:999px; padding:4px 10px; cursor:pointer;
+  }
+  .delivery-contrib-chip input{margin:0;}
+  .delivery-check-field{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-soft); cursor:pointer;}
+  .delivery-upload-form button[type="submit"]{
+    align-self:flex-start; background:var(--gm); color:#fff; border:none; border-radius:9px;
+    padding:9px 18px; font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;
+    transition:opacity .15s ease;
+  }
+  .delivery-upload-form button[type="submit"]:hover{opacity:.9;}
+  .delivery-upload-form button:disabled,
+  .delivery-upload-form input:disabled,
+  .delivery-upload-form textarea:disabled{opacity:.55; cursor:not-allowed;}
+  .delivery-upload-hint{font-size:11px; color:var(--ink-faint); margin:0;}
+  .delivery-upload-status{font-size:11.5px; color:var(--risk-low); margin:0;}
+  .delivery-upload-status.is-error{color:var(--risk-high);}
+
   /* ---------- V6: 通用檔案附件（非圖片／影片） ---------- */
   .file-chip{
     display:flex; align-items:center; gap:9px; padding:10px 12px; border-radius:12px;

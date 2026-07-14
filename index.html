@@ -205,6 +205,40 @@
       <div class="ws-block" id="delivery">
         <p class="ws-block-title">交付中心・已完成的成品與 Demo <span class="ws-block-note">可以直接點連結看 Demo，也可以下載完整檔案包</span></p>
         <div class="delivery-grid" id="deliveryGrid"></div>
+        <p class="delivery-sync-status" id="deliverySyncStatus">載入中…</p>
+
+        <details class="delivery-upload-panel">
+          <summary>＋ 上傳真實交付項目（Cloudflare R2）</summary>
+          <form id="deliveryUploadForm" class="delivery-upload-form">
+            <label class="delivery-field">
+              <span>交付項目標題</span>
+              <input type="text" id="deliveryTitleInput" placeholder="例如：官網改版・第二階段" maxlength="100" required>
+            </label>
+            <label class="delivery-field">
+              <span>說明（選填）</span>
+              <textarea id="deliveryDescInput" rows="2" maxlength="300" placeholder="一句話說明，可以提到是哪些部門/角色產出的"></textarea>
+            </label>
+            <div class="delivery-field">
+              <span>參與部門（選填，可複選）</span>
+              <div class="delivery-contrib-list" id="deliveryContributorList"></div>
+            </div>
+            <label class="delivery-field">
+              <span>Demo 檔案（例如一份 .html 網頁，選填）</span>
+              <input type="file" id="deliveryDemoFileInput">
+            </label>
+            <label class="delivery-field">
+              <span>下載檔案包（例如一份 .zip，選填）</span>
+              <input type="file" id="deliveryDownloadFileInput">
+            </label>
+            <label class="delivery-check-field">
+              <input type="checkbox" id="deliveryVerifiedInput">
+              <span>這個項目已經過品質保證部（小質）驗收</span>
+            </label>
+            <button type="submit">上傳並發布交付項目</button>
+            <p class="delivery-upload-hint" id="deliveryUploadHint">載入中…</p>
+            <p class="delivery-upload-status" id="deliveryUploadStatus"></p>
+          </form>
+        </details>
       </div>
     </section>
 
@@ -301,7 +335,7 @@
 
   <footer class="site-footer">
     <div class="plate">Elvis 程式設計 <span>· 艾維斯資訊 IT 顧問</span></div>
-    <div class="meta"><span>V30.0</span><span>2026.07.14</span></div>
+    <div class="meta"><span>V31.0</span><span>2026.07.14</span></div>
   </footer>
 
   <!-- shared gradient definition -->

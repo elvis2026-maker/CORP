@@ -79,10 +79,16 @@ function renderOrg(registry) {
 // 留空字串就誠實顯示「尚未部署」的鎖定按鈕，不會再出現看起來能點、
 // 點下去卻沒反應的假連結（V23 以前 href="#" + onclick="return false;"
 // 的做法）。詳見 delivery-data.js 開頭的說明。
-function renderDelivery(deliveryRegistry, orgRegistry) {
+//
+// V31：交付中心串接 Cloudflare R2 後，畫面上會同時出現兩種卡片——董事長
+// 透過上傳表單真的送進 R2 的「真實交付項目」，跟 delivery-data.js 裡固定的
+// 「示範內容」。跟 V23 部門看板的「示範內容」小標籤是同一個精神：真實項目
+// 不會有這個標籤，示範內容的卡片右下角會誠實標出來，不讓董事長誤以為那些
+// 也是真的已經完成的案子。
+function renderDelivery(items, orgRegistry) {
   const container = document.getElementById('deliveryGrid');
   if (!container) return;
-  container.innerHTML = deliveryRegistry.map(d => {
+  container.innerHTML = items.map(d => {
     const contributorDepts = (d.contributors || [])
       .map(id => orgRegistry.find(r => r.id === id))
       .filter(Boolean);
@@ -92,10 +98,11 @@ function renderDelivery(deliveryRegistry, orgRegistry) {
     ).join('');
     const demoBtn = d.demoUrl
       ? `<a class="btn-preview" href="${d.demoUrl}" target="_blank" rel="noopener noreferrer">看 Demo</a>`
-      : `<button type="button" class="btn-preview is-disabled" disabled title="這個項目還沒有可預覽的 Demo 網址，等實際完成後由董事長把網址填進 delivery-data.js">看 Demo</button>`;
+      : `<button type="button" class="btn-preview is-disabled" disabled title="這個項目還沒有可預覽的 Demo 網址，等實際完成後可以在下方表單上傳，或手動把網址填進 delivery-data.js">看 Demo</button>`;
     const downloadBtn = d.downloadUrl
       ? `<a class="btn-download" href="${d.downloadUrl}" download target="_blank" rel="noopener noreferrer">下載檔案包</a>`
-      : `<button type="button" class="btn-download is-disabled" disabled title="這個項目還沒有可下載的檔案，等實際完成後由董事長把連結填進 delivery-data.js">下載檔案包</button>`;
+      : `<button type="button" class="btn-download is-disabled" disabled title="這個項目還沒有可下載的檔案，等實際完成後可以在下方表單上傳，或手動把連結填進 delivery-data.js">下載檔案包</button>`;
+    const demoTag = d.isDemoItem ? '<i class="bc-demo-tag delivery-demo-tag">示範內容</i>' : '';
     return `
         <div class="delivery-card">
           <div class="delivery-thumb ${thumbClass}">${avatarsHtml}</div>
@@ -104,8 +111,8 @@ function renderDelivery(deliveryRegistry, orgRegistry) {
             <p class="delivery-desc">${d.desc}</p>
             <div class="delivery-meta-row">
               <span class="delivery-badge ${d.badge}">${d.badgeLabel}</span>
-              <span class="delivery-version">${d.version}</span>
-              <span class="delivery-time">${d.time}</span>
+              <span class="delivery-version">${d.version || ''}</span>
+              <span class="delivery-time">${d.time || ''}${demoTag}</span>
             </div>
             <div class="delivery-actions">${demoBtn}${downloadBtn}</div>
           </div>
@@ -116,7 +123,11 @@ function renderDelivery(deliveryRegistry, orgRegistry) {
 // 先 render 三處畫面，後面的互動邏輯（手風琴、燈號跳轉…）才有元素可以綁定
 // V23：org-data.js 裡的 board 內容一律先當成「示範內容」標記起來，
 // 頁面載入後 loadBoardState() 會用真正的後端資料覆蓋掉有真實紀錄的部門。
+// V31：delivery-data.js 裡的固定內容同樣先標記成「示範內容」，
+// 頁面載入後 loadDeliveryState() 會把 Cloudflare R2 裡真實上傳過的項目
+// 一併插進來顯示，兩種卡片會用小標籤明顯區分開來。
 ORG_REGISTRY.forEach(r => { r.board.isDemo = true; });
+DELIVERY_REGISTRY.forEach(d => { d.isDemoItem = true; });
 renderLights(ORG_REGISTRY);
 renderBoard(ORG_REGISTRY);
 renderOrg(ORG_REGISTRY);
@@ -776,6 +787,164 @@ async function loadBoardState() {
   }
 }
 loadBoardState();
+
+// ---------------- V31：交付中心串接真實檔案儲存服務（Cloudflare R2） ----------------
+// V24 當時把資料結構準備好（DELIVERY_REGISTRY），但老實說清楚「沒有導入額外的
+// 第三方儲存／部署服務，日後有真實案子完成時，需要手動把真實網址填進
+// delivery-data.js，不是自動產生的」。這一版把這個缺口補上：
+// - 頁面載入時呼叫 GET /delivery-list，把 Cloudflare R2 裡真的上傳過的交付項目
+//   讀出來，跟 delivery-data.js 的示範內容合併顯示（真實項目排在前面）
+// - 下方新增一個上傳表單，董事長真的完成一個案子時，直接在這裡選檔案上傳，
+//   不用再手動編輯 delivery-data.js 或跑一趟 Cloudflare 後台
+// 跟 V23 部門看板同樣的精神：真實項目跟示範內容會用小標籤明顯區分，不會讓
+// 董事長分不清楚哪些是真的已經完成的案子。
+function formatDeliveryTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
+}
+async function loadDeliveryState() {
+  const status = document.getElementById('deliverySyncStatus');
+  const base = apiBase();
+  const demoItems = DELIVERY_REGISTRY.map(d => ({ ...d, isDemoItem: true }));
+  if (!base) {
+    if (status) {
+      status.textContent = '尚未設定 Worker 網址，以下都是 delivery-data.js 裡的示範內容，還沒有真實交付項目，上傳表單暫時停用。';
+      status.classList.add('is-error');
+    }
+    renderDelivery(demoItems, ORG_REGISTRY);
+    setDeliveryUploadEnabled(false, '尚未設定 Worker 網址');
+    return;
+  }
+  try {
+    const res = await fetch(`${base}/delivery-list`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (data.error) {
+      if (status) {
+        status.textContent = data.error;
+        status.classList.add('is-error');
+      }
+      renderDelivery(demoItems, ORG_REGISTRY);
+      setDeliveryUploadEnabled(false, 'R2／KV 尚未綁定完成');
+      return;
+    }
+    const realItems = (data.items || []).map(it => ({
+      id: it.id,
+      title: it.title,
+      desc: it.desc,
+      contributors: it.contributors || [],
+      badge: it.badge,
+      badgeLabel: it.badgeLabel,
+      version: '',
+      time: it.uploadedAt ? formatDeliveryTime(it.uploadedAt) : '',
+      demoUrl: it.hasDemo ? `${base}/delivery-file?id=${encodeURIComponent(it.id)}&kind=demo` : '',
+      downloadUrl: it.hasDownload ? `${base}/delivery-file?id=${encodeURIComponent(it.id)}&kind=download` : '',
+      isDemoItem: false,
+    }));
+    renderDelivery([...realItems, ...demoItems], ORG_REGISTRY);
+    if (status) {
+      status.textContent = realItems.length > 0
+        ? `已連上真實交付檔案儲存（Cloudflare R2）：${realItems.length} 筆真實交付項目，其餘為 delivery-data.js 的示範內容。`
+        : '已連上真實交付檔案儲存（Cloudflare R2），目前還沒有任何真實上傳過的項目，以下先顯示示範內容，可以用下方表單上傳第一筆。';
+      status.classList.remove('is-error');
+    }
+    setDeliveryUploadEnabled(true);
+  } catch (err) {
+    console.error('讀取交付項目清單失敗：', err);
+    if (status) {
+      status.textContent = '目前連不上交付檔案儲存服務，暫時顯示示範內容，稍後重新整理頁面再試一次。';
+      status.classList.add('is-error');
+    }
+    renderDelivery(demoItems, ORG_REGISTRY);
+    setDeliveryUploadEnabled(false, '連不上後端服務');
+  }
+}
+
+function setDeliveryUploadEnabled(enabled, reason) {
+  const form = document.getElementById('deliveryUploadForm');
+  if (!form) return;
+  form.querySelectorAll('input, textarea, button').forEach(el => { el.disabled = !enabled; });
+  const hint = document.getElementById('deliveryUploadHint');
+  if (hint) {
+    hint.textContent = enabled
+      ? '選擇檔案後按下方按鈕上傳，完成後會直接出現在上方交付中心清單，不用重新整理頁面。'
+      : `目前無法上傳（${reason || '後端尚未就緒'}），請見 README「V31 設定方法」完成 R2 設定。`;
+  }
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+const deliveryUploadForm = document.getElementById('deliveryUploadForm');
+if (deliveryUploadForm) {
+  deliveryUploadForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const base = apiBase();
+    const statusEl = document.getElementById('deliveryUploadStatus');
+    const titleEl = document.getElementById('deliveryTitleInput');
+    const descEl = document.getElementById('deliveryDescInput');
+    const verifiedEl = document.getElementById('deliveryVerifiedInput');
+    const demoFileEl = document.getElementById('deliveryDemoFileInput');
+    const downloadFileEl = document.getElementById('deliveryDownloadFileInput');
+    const contributorEls = deliveryUploadForm.querySelectorAll('input[name="deliveryContributor"]:checked');
+    const contributors = Array.from(contributorEls).map(el => el.value);
+
+    if (!titleEl.value.trim()) {
+      if (statusEl) { statusEl.textContent = '請填寫交付項目標題。'; statusEl.classList.add('is-error'); }
+      return;
+    }
+    const demoFile = demoFileEl.files[0] || null;
+    const downloadFile = downloadFileEl.files[0] || null;
+    if (!demoFile && !downloadFile) {
+      if (statusEl) { statusEl.textContent = 'Demo 檔案跟下載檔案包，至少要選一個。'; statusEl.classList.add('is-error'); }
+      return;
+    }
+
+    const submitBtn = deliveryUploadForm.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    if (statusEl) { statusEl.textContent = '上傳中，檔案較大時可能需要幾秒鐘…'; statusEl.classList.remove('is-error'); }
+
+    try {
+      const payload = {
+        title: titleEl.value.trim(),
+        desc: descEl.value.trim(),
+        contributors,
+        verified: !!(verifiedEl && verifiedEl.checked),
+        demoFile: demoFile ? { name: demoFile.name, mimeType: demoFile.type || 'text/html', data: await fileToBase64(demoFile) } : null,
+        downloadFile: downloadFile ? { name: downloadFile.name, mimeType: downloadFile.type || 'application/octet-stream', data: await fileToBase64(downloadFile) } : null,
+      };
+      const res = await fetch(`${base}/delivery-upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      deliveryUploadForm.reset();
+      if (statusEl) { statusEl.textContent = '✓ 上傳成功，已經出現在上方交付中心清單裡。'; statusEl.classList.remove('is-error'); }
+      await loadDeliveryState();
+    } catch (err) {
+      console.error('交付項目上傳失敗：', err);
+      if (statusEl) { statusEl.textContent = `上傳失敗：${err.message || err}`; statusEl.classList.add('is-error'); }
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  });
+}
+// 部門複選勾選框從 ORG_REGISTRY 動態產生，部門異動時（新增/調整）不需要另外改這裡
+const deliveryContributorList = document.getElementById('deliveryContributorList');
+if (deliveryContributorList) {
+  deliveryContributorList.innerHTML = ORG_REGISTRY.map(r =>
+    `<label class="delivery-contrib-chip"><input type="checkbox" name="deliveryContributor" value="${r.id}"> ${r.nameOrg}${r.nick}</label>`
+  ).join('');
+}
+loadDeliveryState();
 
 // ---------------- V25：讀取真實對話紀錄，取代重新整理後又變回展示訊息的問題 ----------------
 // 沒設定 Worker，或 Worker 還沒綁 KV、或這是第一次使用、還沒有任何真實對話——

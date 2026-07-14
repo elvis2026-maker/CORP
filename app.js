@@ -771,6 +771,62 @@ async function loadBoardState() {
 }
 loadBoardState();
 
+// ---------------- V25：讀取真實對話紀錄，取代重新整理後又變回展示訊息的問題 ----------------
+// 沒設定 Worker，或 Worker 還沒綁 KV、或這是第一次使用、還沒有任何真實對話——
+// 這幾種情況都直接維持 index.html 裡原本寫死的展示對話（晨報卡片＋兩輪示範對話），
+// 不強行清空畫面。只有「Worker 真的回傳了至少一則歷史訊息」時，才會清掉展示對話，
+// 換成真正發生過的內容——這樣不管有沒有設定後端，董事長看到的畫面都是完整的，
+// 不會出現「空白對話框」這種更奇怪的狀態。
+//
+// 範圍老實說清楚：這裡只還原「文字對話」與風險標示，不會還原之前對話裡附過的
+// 圖片／影片縮圖、也不會還原「部門執行結果」卡片——這兩者從來沒有被送到任何
+// 後端保存過（見 cloudflare-worker.js persistChatTurn 的說明），這是已知限制，
+// 不是這次沒做好。
+function buildGmHistoryMessageHtml(text, risk) {
+  const riskBadge = risk
+    ? `<span class="risk risk-${risk.level}" title="${String(risk.reason || '').replace(/"/g,'&quot;')}">${RISK_LABEL[risk.level] || '風險'}</span> `
+    : '';
+  return `
+      <div class="msg msg-gm">
+        <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
+        <div class="msg-body">
+          <span class="msg-role">總經理 · 小總</span>
+          <p>${riskBadge}${escapeBoardText(text)}</p>
+          ${risk ? `<p class="gm-risk-reason">風控官（小控）：${escapeBoardText(risk.reason)}</p>` : ''}
+        </div>
+      </div>`;
+}
+function buildUserHistoryMessageHtml(text) {
+  return `
+      <div class="msg msg-user">
+        <span class="ava ava-chairman ava-sm" aria-hidden="true"><span class="ava-glyph">劉</span></span>
+        <div class="msg-body">
+          <span class="msg-role">董事長</span>
+          <p>${escapeBoardText(text)}</p>
+        </div>
+      </div>`;
+}
+async function loadChatHistory() {
+  const base = apiBase();
+  if (!base) return; // 沒設定 Worker：維持展示對話
+  try {
+    const res = await fetch(`${base}/chat-history`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error || !Array.isArray(data.messages) || data.messages.length === 0) return; // 沒有真實紀錄：維持展示對話
+    document.querySelectorAll('#consoleLog .msg').forEach(el => el.remove()); // 晨報卡片（.briefing-card）保留，只清掉對話訊息
+    const html = data.messages.map(m => (
+      m.role === 'model' ? buildGmHistoryMessageHtml(m.text, m.risk) : buildUserHistoryMessageHtml(m.text)
+    )).join('');
+    log.insertAdjacentHTML('beforeend', html);
+    log.scrollTop = log.scrollHeight;
+    // 同步進記憶體的 chatHistory，總經理接下來的回覆才會記得這些真實對話內容
+    chatHistory = data.messages.map(m => ({ role: m.role, text: m.text }));
+  } catch (err) {
+    console.error('讀取對話紀錄失敗，維持展示對話：', err);
+  }
+}
+loadChatHistory();
+
 document.querySelectorAll('.approval-actions button').forEach(btn => {
   btn.addEventListener('click', async () => {
     const card = document.getElementById(btn.dataset.target);

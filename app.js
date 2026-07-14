@@ -466,22 +466,7 @@ form.addEventListener('submit', (e) => {
     // V22：GM 委派子任務給某個部門角色時，額外插入一張「部門執行結果」卡片，
     // 讓董事長看得到「誰做了什麼、結果是什麼」，不只是總經理一句話帶過。
     if (result.subtask) {
-      const st = result.subtask;
-      const dept = ORG_REGISTRY.find(r => r.id === st.deptId);
-      const avaClass = dept ? dept.avaClass : 'ava-gm';
-      const glyph = dept ? dept.glyph : '？';
-      log.insertAdjacentHTML('beforeend', `
-        <div class="subtask-card">
-          <div class="subtask-top">
-            <span class="ava ${avaClass} ava-sm" aria-hidden="true"><span class="ava-glyph">${glyph}</span></span>
-            <div class="subtask-who">
-              <p class="subtask-role">${(st.roleName || '').replace(/</g,'&lt;')}<span class="subtask-nick">${(st.roleNick || '').replace(/</g,'&lt;')}</span></p>
-              <p class="subtask-dept">${(st.deptName || '').replace(/</g,'&lt;')} · 總經理委派子任務</p>
-            </div>
-          </div>
-          <p class="subtask-task">任務：${(st.task || '').replace(/</g,'&lt;')}</p>
-          <p class="subtask-result">${(st.result || '').replace(/</g,'&lt;')}</p>
-        </div>`);
+      log.insertAdjacentHTML('beforeend', buildSubtaskCardHtml(result.subtask));
       // V23：Worker 那邊已經把這筆任務寫進部門看板的後端資料了，這裡重新讀一次
       // /board-state，讓「部門即時看板」馬上顯示剛剛發生的真實任務，不用等重新整理頁面
       loadBoardState();
@@ -710,6 +695,27 @@ function formatBoardTime(iso) {
 function escapeBoardText(s) {
   return String(s == null ? '' : s).replace(/</g, '&lt;');
 }
+
+// V28：把「部門執行結果」卡片的 HTML 組裝抽成共用函式——原本即時顯示（送出指令
+// 當下）跟歷史還原（重新整理頁面後）各寫一份幾乎一樣的樣板，兩份內容遲早會兜不
+// 起來；現在兩處都呼叫這一個函式，只維護一份標記邏輯。
+function buildSubtaskCardHtml(st) {
+  const dept = ORG_REGISTRY.find(r => r.id === st.deptId);
+  const avaClass = dept ? dept.avaClass : 'ava-gm';
+  const glyph = dept ? dept.glyph : '？';
+  return `
+      <div class="subtask-card">
+        <div class="subtask-top">
+          <span class="ava ${avaClass} ava-sm" aria-hidden="true"><span class="ava-glyph">${glyph}</span></span>
+          <div class="subtask-who">
+            <p class="subtask-role">${escapeBoardText(st.roleName)}<span class="subtask-nick">${escapeBoardText(st.roleNick)}</span></p>
+            <p class="subtask-dept">${escapeBoardText(st.deptName)} · 總經理委派子任務</p>
+          </div>
+        </div>
+        <p class="subtask-task">任務：${escapeBoardText(st.task)}</p>
+        <p class="subtask-result">${escapeBoardText(st.result)}</p>
+      </div>`;
+}
 async function loadBoardState() {
   const status = document.getElementById('boardSyncStatus');
   const base = apiBase();
@@ -778,14 +784,18 @@ loadBoardState();
 // 換成真正發生過的內容——這樣不管有沒有設定後端，董事長看到的畫面都是完整的，
 // 不會出現「空白對話框」這種更奇怪的狀態。
 //
-// 範圍老實說清楚：這裡只還原「文字對話」與風險標示，不會還原之前對話裡附過的
-// 圖片／影片縮圖、也不會還原「部門執行結果」卡片——這兩者從來沒有被送到任何
-// 後端保存過（見 cloudflare-worker.js persistChatTurn 的說明），這是已知限制，
-// 不是這次沒做好。
-function buildGmHistoryMessageHtml(text, risk) {
+// V28：「部門執行結果」卡片原本不在還原範圍內——董事長回報「小快的報告卡片，
+// 重新整理頁面後就消失了」，查證後確認這是 V25 就存在、沒寫進待辦清單的缺口
+// （見 cloudflare-worker.js persistChatTurn 的說明），這一版把它補上。
+//
+// 範圍老實說清楚：這裡只還原「文字對話」與風險標示、以及委派子任務的執行結果卡片，
+// 不會還原之前對話裡附過的圖片／影片縮圖——附件的實際檔案內容從來沒有被送到任何
+// 後端保存過，這是仍然存在的已知限制，不是這次沒做好。
+function buildGmHistoryMessageHtml(text, risk, subtask) {
   const riskBadge = risk
     ? `<span class="risk risk-${risk.level}" title="${String(risk.reason || '').replace(/"/g,'&quot;')}">${RISK_LABEL[risk.level] || '風險'}</span> `
     : '';
+  const subtaskHtml = subtask ? buildSubtaskCardHtml(subtask) : '';
   return `
       <div class="msg msg-gm">
         <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
@@ -794,7 +804,7 @@ function buildGmHistoryMessageHtml(text, risk) {
           <p>${riskBadge}${escapeBoardText(text)}</p>
           ${risk ? `<p class="gm-risk-reason">風控官（小控）：${escapeBoardText(risk.reason)}</p>` : ''}
         </div>
-      </div>`;
+      </div>${subtaskHtml}`;
 }
 function buildUserHistoryMessageHtml(text) {
   return `
@@ -813,9 +823,9 @@ async function loadChatHistory() {
     const res = await fetch(`${base}/chat-history`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error || !Array.isArray(data.messages) || data.messages.length === 0) return; // 沒有真實紀錄：維持展示對話
-    document.querySelectorAll('#consoleLog .msg').forEach(el => el.remove()); // 晨報卡片（.briefing-card）保留，只清掉對話訊息
+    document.querySelectorAll('#consoleLog .msg, #consoleLog .subtask-card').forEach(el => el.remove()); // 晨報卡片（.briefing-card）保留，只清掉對話訊息與委派結果卡片
     const html = data.messages.map(m => (
-      m.role === 'model' ? buildGmHistoryMessageHtml(m.text, m.risk) : buildUserHistoryMessageHtml(m.text)
+      m.role === 'model' ? buildGmHistoryMessageHtml(m.text, m.risk, m.subtask) : buildUserHistoryMessageHtml(m.text)
     )).join('');
     log.insertAdjacentHTML('beforeend', html);
     log.scrollTop = log.scrollHeight;

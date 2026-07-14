@@ -25,14 +25,7 @@
 //   desc        — 組織架構展開後的部門簡介
 //   lights      — { dot, state }：狀態燈號要顯示的顏色與文字
 //   board       — { avaState, statusDot, statusLabel, task, progress, metaLeft, metaRight, log }
-//                 部門即時看板卡片需要的所有內容，log 是該部門內部的討論紀錄。
-//                 【V23 起】這裡寫的內容只是「初始示範內容」：頁面載入時 app.js 的
-//                 loadBoardState() 會去問後端（cloudflare-worker.js 的 /board-state，
-//                 存在 Cloudflare KV）有沒有這個部門「真實發生過」的任務紀錄——如果
-//                 有（總經理委派子任務、角色真的產出過結果），就會覆蓋掉這裡的內容並
-//                 拿掉「示範內容」標籤；沒有的話，就繼續顯示這裡寫的示範內容。也就是
-//                 這裡的 task/progress/log 不會再被程式碼改動，但畫面上看到的不一定是
-//                 這裡寫的東西，要看該部門有沒有真實任務紀錄。
+//                 部門即時看板卡片需要的所有內容，log 是該部門內部的討論紀錄
 //   roles       — [{ name, nick, nameEn, fn }]：組織架構展開後的角色清單
 //
 // 招聘／組織變動的目標流程（詳見 README）：總經理提案 → 董事長於待審批

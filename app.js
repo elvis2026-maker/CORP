@@ -191,8 +191,8 @@ async function getGmReply(text, mediaType, files) {
   const fallbackPool = mediaType ? (acksMedia[mediaType] || acks) : acks;
 
   if (!endpoint) {
-    // 還沒設定 Worker 網址：沿用展示用的固定回覆，網站仍然完整可用（示範回覆不附風險標示）
-    return { text: fallbackPool[Math.floor(Math.random() * fallbackPool.length)], risk: null, skipped: [] };
+    // 還沒設定 Worker 網址：沿用展示用的固定回覆，網站仍然完整可用（示範回覆不附風險標示與子任務）
+    return { text: fallbackPool[Math.floor(Math.random() * fallbackPool.length)], risk: null, subtask: null, skipped: [] };
   }
 
   try {
@@ -221,11 +221,12 @@ async function getGmReply(text, mediaType, files) {
     return {
       text: data.reply || '（總經理這次沒有回覆內容，麻煩再問一次）',
       risk: (data.risk && data.risk.level && data.risk.reason) ? data.risk : null,
+      subtask: (data.subtask && data.subtask.deptId) ? data.subtask : null,
       skipped,
     };
   } catch (err) {
     console.error('呼叫總經理 API 失敗：', err);
-    return { text: `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`, risk: null, skipped: [] };
+    return { text: `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`, risk: null, subtask: null, skipped: [] };
   }
 }
 
@@ -412,6 +413,28 @@ form.addEventListener('submit', (e) => {
         </div>
       </div>`);
     log.lastElementChild.querySelector('.gm-reply-text').textContent = result.text;
+
+    // V22：GM 委派子任務給某個部門角色時，額外插入一張「部門執行結果」卡片，
+    // 讓董事長看得到「誰做了什麼、結果是什麼」，不只是總經理一句話帶過。
+    if (result.subtask) {
+      const st = result.subtask;
+      const dept = ORG_REGISTRY.find(r => r.id === st.deptId);
+      const avaClass = dept ? dept.avaClass : 'ava-gm';
+      const glyph = dept ? dept.glyph : '？';
+      log.insertAdjacentHTML('beforeend', `
+        <div class="subtask-card">
+          <div class="subtask-top">
+            <span class="ava ${avaClass} ava-sm" aria-hidden="true"><span class="ava-glyph">${glyph}</span></span>
+            <div class="subtask-who">
+              <p class="subtask-role">${(st.roleName || '').replace(/</g,'&lt;')}<span class="subtask-nick">${(st.roleNick || '').replace(/</g,'&lt;')}</span></p>
+              <p class="subtask-dept">${(st.deptName || '').replace(/</g,'&lt;')} · 總經理委派子任務</p>
+            </div>
+          </div>
+          <p class="subtask-task">任務：${(st.task || '').replace(/</g,'&lt;')}</p>
+          <p class="subtask-result">${(st.result || '').replace(/</g,'&lt;')}</p>
+        </div>`);
+    }
+
     log.scrollTop = log.scrollHeight;
     chatHistory.push({ role: 'user', text: text || '（附加了圖片／影片／檔案，無文字）' });
     chatHistory.push({ role: 'model', text: result.text });

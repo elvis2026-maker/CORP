@@ -29,6 +29,7 @@ function renderBoard(registry) {
     const statusKey = b.statusDot.replace('s-', '');
     const logHtml = b.log.map(item => `
             <div class="bc-log-item"><span class="who">${item.who}</span><span class="txt">${item.txt}</span><span class="t">${item.time}</span></div>`).join('');
+    const demoTag = b.isDemo ? '<i class="bc-demo-tag">示範內容</i>' : '';
     return `
         <details class="board-card" data-group="board" id="${r.id}" data-status="${statusKey}">
           <summary>
@@ -40,7 +41,7 @@ function renderBoard(registry) {
             </div>
             <p class="bc-task">${b.task}</p>
             <div class="bc-bar"><div class="bc-bar-fill" style="width:${b.progress}%"></div></div>
-            <div class="bc-meta"><span>${b.metaLeft}</span><span>${b.metaRight}</span></div>
+            <div class="bc-meta"><span>${b.metaLeft}</span><span>${b.metaRight}${demoTag}</span></div>
           </summary>
           <div class="bc-log">${logHtml}
           </div>
@@ -72,6 +73,9 @@ function renderOrg(registry) {
 }
 
 // 先 render 三處畫面，後面的互動邏輯（手風琴、燈號跳轉…）才有元素可以綁定
+// V23：org-data.js 裡的 board 內容一律先當成「示範內容」標記起來，
+// 頁面載入後 loadBoardState() 會用真正的後端資料覆蓋掉有真實紀錄的部門。
+ORG_REGISTRY.forEach(r => { r.board.isDemo = true; });
 renderLights(ORG_REGISTRY);
 renderBoard(ORG_REGISTRY);
 renderOrg(ORG_REGISTRY);
@@ -103,7 +107,10 @@ function bindDeptAccordion() {
   accordion(document.querySelectorAll('details.dept'));
 }
 bindDeptAccordion();
-accordion(document.querySelectorAll('details.board-card[data-group="board"]'));
+function bindBoardAccordion() {
+  accordion(document.querySelectorAll('details.board-card[data-group="board"]'));
+}
+bindBoardAccordion();
 
 // status chips: jump straight to the matching department card, open it, and flash-highlight it
 document.querySelectorAll('[data-dept-target]').forEach(a => {
@@ -433,6 +440,9 @@ form.addEventListener('submit', (e) => {
           <p class="subtask-task">任務：${(st.task || '').replace(/</g,'&lt;')}</p>
           <p class="subtask-result">${(st.result || '').replace(/</g,'&lt;')}</p>
         </div>`);
+      // V23：Worker 那邊已經把這筆任務寫進部門看板的後端資料了，這裡重新讀一次
+      // /board-state，讓「部門即時看板」馬上顯示剛剛發生的真實任務，不用等重新整理頁面
+      loadBoardState();
     }
 
     log.scrollTop = log.scrollHeight;
@@ -638,6 +648,86 @@ async function loadApprovalHistory() {
   }
 }
 loadApprovalHistory();
+
+// ---------------- V23：部門即時看板改為串接真實任務資料庫 ----------------
+// org-data.js 裡的 board 內容原本是固定寫死的示範資料（task／log／progress
+// 永遠一樣）。這裡改成頁面載入時去讀 Worker 的 /board-state：如果某個部門已經
+// 有真實任務紀錄（總經理委派子任務、角色真的產出過執行結果，見
+// cloudflare-worker.js 的 persistBoardTask），就用真實資料覆蓋掉那個部門原本
+// 顯示的示範內容；還沒有真實紀錄的部門，繼續顯示 org-data.js 的示範內容，並在
+// 卡片右下角標一個「示範內容」小標籤，不讓董事長誤以為那些都是真的發生過的事。
+//
+// 老實說清楚這裡的範圍：目前唯一會寫入真實任務資料的來源，是總經理在對話裡
+// 委派子任務、且子任務真的執行成功這條路徑（V22 功能）；看板本身沒有另外一個
+// 「手動新增任務」的介面，也還沒有「進行中、尚未完成」這種中間狀態——子任務是
+// 一次 Gemini 呼叫就同步做完的，所以任務一出現在看板上就已經是「完成」的狀態。
+function formatBoardTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
+}
+function escapeBoardText(s) {
+  return String(s == null ? '' : s).replace(/</g, '&lt;');
+}
+async function loadBoardState() {
+  const status = document.getElementById('boardSyncStatus');
+  const base = apiBase();
+  if (!base) {
+    if (status) {
+      status.textContent = '尚未設定 Worker 網址，以下都是 org-data.js 裡的示範內容，還沒有真實任務資料。';
+      status.classList.add('is-error');
+    }
+    return;
+  }
+  try {
+    const res = await fetch(`${base}/board-state`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (data.error) {
+      if (status) {
+        status.textContent = data.error;
+        status.classList.add('is-error');
+      }
+      return;
+    }
+    const tasks = data.tasks || {};
+    const logs = data.logs || {};
+    let realCount = 0;
+    ORG_REGISTRY.forEach(r => {
+      const t = tasks[r.id];
+      if (!t) return; // 這個部門還沒有真實任務紀錄，維持 org-data.js 的示範內容
+      realCount++;
+      r.board.isDemo = false;
+      r.board.task = escapeBoardText(t.task);
+      r.board.progress = Number.isFinite(t.progress) ? Math.max(0, Math.min(100, t.progress)) : r.board.progress;
+      r.board.statusLabel = t.statusLabel || r.board.statusLabel;
+      r.board.statusDot = t.statusDot || r.board.statusDot;
+      r.board.avaState = t.statusDot === 's-working' ? 'is-active' : (t.statusDot === 's-meeting' ? 'is-meeting' : '');
+      r.board.metaLeft = `進度 ${r.board.progress}%`;
+      r.board.metaRight = t.updatedAt ? `${formatBoardTime(t.updatedAt)} 更新` : '剛剛更新';
+      const realLogs = (logs[r.id] || []).map(item => ({
+        who: escapeBoardText(item.who),
+        txt: escapeBoardText(item.txt),
+        time: formatBoardTime(item.time),
+      }));
+      if (realLogs.length) r.board.log = realLogs;
+    });
+    renderBoard(ORG_REGISTRY);
+    bindBoardAccordion();
+    if (status) {
+      status.textContent = realCount > 0
+        ? `已連上部門任務資料庫（Cloudflare KV）：${realCount} 個部門有真實任務紀錄，其餘部門顯示 org-data.js 的示範內容。`
+        : '已連上部門任務資料庫，目前還沒有任何部門產生過真實任務紀錄（總經理委派過至少一次子任務後就會出現），以下先顯示示範內容。';
+      status.classList.remove('is-error');
+    }
+  } catch (err) {
+    console.error('讀取部門看板資料失敗：', err);
+    if (status) {
+      status.textContent = '目前連不上部門任務資料庫，看板暫時顯示示範內容，稍後重新整理頁面再試一次。';
+      status.classList.add('is-error');
+    }
+  }
+}
+loadBoardState();
 
 document.querySelectorAll('.approval-actions button').forEach(btn => {
   btn.addEventListener('click', async () => {

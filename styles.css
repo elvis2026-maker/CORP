@@ -655,6 +655,12 @@
   .approval-history-item .hist-meta{color:var(--ink-faint); font-size:11px; margin-top:2px;}
   .approval-history-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
   .approval-history-status.is-error{color:var(--risk-high);}
+  .board-sync-status{margin-top:8px; font-size:11px; color:var(--ink-faint);}
+  .board-sync-status.is-error{color:var(--risk-high);}
+  .bc-demo-tag{
+    margin-left:6px; font-style:normal; color:var(--ink-faint);
+    border:1px solid var(--line-strong); border-radius:999px; padding:1px 7px; font-size:9.5px;
+  }
 
   /* ---------- V6: 交付中心 Delivery Center ---------- */
   .delivery{padding:30px 0 6px;}

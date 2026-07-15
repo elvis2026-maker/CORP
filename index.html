@@ -229,11 +229,11 @@
 
       <div class="ws-block" id="delivery">
         <p class="ws-block-title">交付中心・已完成的成品與 Demo <span class="ws-block-note">可以直接點連結看 Demo，也可以下載完整檔案包</span></p>
-        <div class="delivery-grid" id="deliveryGrid"></div>
+        <div class="delivery-list" id="deliveryGrid"></div>
         <p class="delivery-sync-status" id="deliverySyncStatus">載入中…</p>
 
         <details class="delivery-upload-panel">
-          <summary>＋ 上傳真實交付項目（Cloudflare R2）</summary>
+          <summary>＋ 新增真實交付項目</summary>
           <form id="deliveryUploadForm" class="delivery-upload-form">
             <label class="delivery-field">
               <span>交付項目標題</span>
@@ -247,19 +247,29 @@
               <span>參與部門（選填，可複選）</span>
               <div class="delivery-contrib-list" id="deliveryContributorList"></div>
             </div>
+            <p class="delivery-upload-subhead">Demo（網址或檔案，擇一即可；有些成果需要真實資料庫或後端服務才能展示，直接填已經部署好的網址最方便，也方便您直接把連結轉傳給客戶）</p>
             <label class="delivery-field">
-              <span>Demo 檔案（例如一份 .html 網頁，選填）</span>
-              <input type="file" id="deliveryDemoFileInput">
+              <span>Demo 網址（選填）</span>
+              <input type="url" id="deliveryDemoUrlInput" placeholder="例如：https://your-demo.example.com">
             </label>
             <label class="delivery-field">
-              <span>下載檔案包（例如一份 .zip，選填）</span>
+              <span>或上傳 Demo 檔案（例如一份 .html 網頁，選填）</span>
+              <input type="file" id="deliveryDemoFileInput">
+            </label>
+            <p class="delivery-upload-subhead">下載檔案包（網址或檔案，擇一即可）</p>
+            <label class="delivery-field">
+              <span>下載網址（選填，例如雲端硬碟分享連結）</span>
+              <input type="url" id="deliveryDownloadUrlInput" placeholder="例如：https://drive.google.com/...">
+            </label>
+            <label class="delivery-field">
+              <span>或上傳下載檔案包（例如一份 .zip，選填）</span>
               <input type="file" id="deliveryDownloadFileInput">
             </label>
             <label class="delivery-check-field">
               <input type="checkbox" id="deliveryVerifiedInput">
               <span>這個項目已經過品質保證部（小質）驗收</span>
             </label>
-            <button type="submit">上傳並發布交付項目</button>
+            <button type="submit">新增交付項目</button>
             <p class="delivery-upload-hint" id="deliveryUploadHint">載入中…</p>
             <p class="delivery-upload-status" id="deliveryUploadStatus"></p>
           </form>
@@ -395,7 +405,7 @@
 
   <footer class="site-footer">
     <div class="plate">Elvis 程式設計 <span>· 艾維斯資訊 IT 顧問</span></div>
-    <div class="meta"><span>V36.0</span><span>2026.07.15</span></div>
+    <div class="meta"><span>V37.0</span><span>2026.07.15</span></div>
   </footer>
 
   <!-- shared gradient definition -->

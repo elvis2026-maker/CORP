@@ -806,49 +806,55 @@
 
   /* ---------- V6: 交付中心 Delivery Center ---------- */
   .delivery{padding:30px 0 6px;}
-  .delivery-grid{margin-top:20px; display:grid; gap:16px; grid-template-columns:1fr;}
-  @media (min-width:720px){ .delivery-grid{grid-template-columns:1fr 1fr;} }
-  .delivery-card{
-    background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md);
-    box-shadow:var(--shadow); overflow:hidden; display:flex; flex-direction:column;
+  /* V37：原本是大卡片＋96px高的色塊縮圖，董事長反應「版面太大、色塊不知道
+     幹嘛用」，改成類似雲端硬碟／共用資料夾的緊湊清單，一列一個項目，
+     色塊縮圖換成一個小圖示，大幅降低每筆項目占用的高度。 */
+  .delivery-list{
+    margin-top:16px; display:flex; flex-direction:column;
+    border:1px solid var(--line); border-radius:var(--radius-md); overflow:hidden;
+    background:var(--card); box-shadow:var(--shadow);
   }
-  .delivery-thumb{
-    height:96px; display:flex; align-items:center; justify-content:center; gap:10px;
-    position:relative; overflow:hidden;
+  .dlist-row{
+    display:flex; align-items:center; gap:12px; padding:11px 16px;
+    border-bottom:1px solid var(--line); transition:background .12s ease;
   }
-  .delivery-thumb .ava{--ava-size:44px; box-shadow:0 4px 14px rgba(15,23,42,.28);}
-  .delivery-thumb::before{
-    content:""; position:absolute; inset:0; opacity:.9;
+  .dlist-row:last-child{border-bottom:none;}
+  .dlist-row:hover{background:var(--paper);}
+  .dlist-icon{
+    flex:none; width:32px; height:32px; border-radius:8px; display:flex;
+    align-items:center; justify-content:center; font-size:14px; color:#fff;
   }
-  .delivery-body{padding:15px 17px 17px; display:flex; flex-direction:column; gap:8px; flex:1;}
-  .delivery-name{font-family:"Noto Serif TC",serif; font-weight:700; font-size:14.5px;}
-  .delivery-desc{font-size:12px; color:var(--ink-soft); line-height:1.65;}
-  .delivery-meta-row{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px;}
-  .delivery-badge{
-    display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:600;
-    padding:2.5px 8px; border-radius:999px;
+  .dlist-main{flex:1 1 auto; min-width:0;}
+  .dlist-title{
+    font-weight:700; font-size:13px; color:var(--ink);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .delivery-badge.verified{color:var(--risk-low); background:var(--risk-low-bg);}
-  .delivery-badge.pending{color:var(--risk-mid); background:var(--risk-mid-bg);}
-  .delivery-version{font-size:10.5px; color:var(--ink-faint);}
-  .delivery-time{font-size:10.5px; color:var(--ink-faint); margin-left:auto;}
-  .delivery-actions{display:flex; gap:8px; margin-top:auto; padding-top:10px;}
-  .delivery-actions a,.delivery-actions button{
-    flex:1; text-align:center; border-radius:9px; padding:9px 10px; font-size:12px; font-weight:600;
-    text-decoration:none; cursor:pointer; font-family:inherit; transition:opacity .15s ease;
+  .dlist-desc{
+    font-size:11.5px; color:var(--ink-soft); margin-top:2px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .btn-preview{background:var(--gm); color:#fff; border:none;}
-  .btn-preview:hover{opacity:.9;}
-  .btn-download{background:var(--paper); color:var(--ink-soft); border:1px solid var(--line-strong);}
-  .btn-download:hover{border-color:var(--violet); color:var(--violet);}
-
+  .dlist-meta{display:flex; align-items:center; gap:6px; flex:none;}
+  .dlist-dept-ava{--ava-size:21px;}
+  .dlist-time{font-size:10.5px; color:var(--ink-faint); white-space:nowrap;}
+  .dlist-actions{display:flex; gap:6px; flex:none;}
+  .dlist-btn{
+    padding:6px 12px; border-radius:8px; font-size:11.5px; font-weight:600;
+    text-decoration:none; cursor:pointer; font-family:inherit; white-space:nowrap;
+    border:1px solid var(--line-strong); color:var(--ink-soft); background:var(--paper);
+    transition:opacity .15s ease;
+  }
+  .dlist-btn:hover{border-color:var(--violet); color:var(--violet);}
+  .dlist-btn-primary{background:var(--gm); color:#fff; border:none;}
+  .dlist-btn-primary:hover{opacity:.9; color:#fff;}
   /* V24：交付中心尚未有真實網址／檔案時的鎖定狀態，跟正常按鈕明顯區隔，
      滑鼠移過去的提示文字會誠實說明原因，不會讓人誤以為連結壞掉 */
-  .delivery-actions button.is-disabled{
-    background:var(--paper); color:var(--ink-faint); border:1px solid var(--line);
-    cursor:not-allowed; opacity:.75;
+  .dlist-btn.is-disabled{cursor:not-allowed; opacity:.6;}
+  .dlist-btn.is-disabled:hover{border-color:var(--line-strong); color:var(--ink-faint);}
+  @media (max-width:640px){
+    .dlist-row{flex-wrap:wrap;}
+    .dlist-desc{white-space:normal;}
+    .dlist-meta{order:3; flex:1 0 100%; margin-top:4px;}
   }
-  .delivery-actions button.is-disabled:hover{opacity:.75; border-color:var(--line); color:var(--ink-faint);}
 
   /* V31：交付中心串接 Cloudflare R2 後新增的畫面元素 */
   .delivery-sync-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
@@ -864,14 +870,21 @@
     margin-top:14px; display:flex; flex-direction:column; gap:12px;
     background:var(--paper); border:1px solid var(--line); border-radius:var(--radius-md); padding:16px;
   }
+  /* V37：Demo／下載檔案包各自的小節標題，說明「網址或檔案擇一」 */
+  .delivery-upload-subhead{
+    font-size:11px; font-weight:700; color:var(--ink-faint); margin:4px 0 -2px;
+    padding-top:8px; border-top:1px dashed var(--line);
+  }
   .delivery-field{display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--ink-soft); font-weight:600;}
   .delivery-field input[type="text"],
+  .delivery-field input[type="url"],
   .delivery-field input[type="file"],
   .delivery-field textarea{
     font-family:inherit; font-size:12.5px; color:var(--ink); background:var(--card);
     border:1px solid var(--line-strong); border-radius:9px; padding:8px 10px; resize:vertical;
   }
   .delivery-field input[type="text"]:focus,
+  .delivery-field input[type="url"]:focus,
   .delivery-field textarea:focus{outline:none; border-color:var(--violet);}
   .delivery-contrib-list{display:flex; flex-wrap:wrap; gap:8px;}
   .delivery-contrib-chip{

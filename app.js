@@ -92,30 +92,33 @@ function renderDelivery(items, orgRegistry) {
     const contributorDepts = (d.contributors || [])
       .map(id => orgRegistry.find(r => r.id === id))
       .filter(Boolean);
-    const thumbClass = contributorDepts[0] ? contributorDepts[0].avaClass : 'ava-gm';
-    const avatarsHtml = contributorDepts.slice(0, 2).map(dept =>
-      `<span class="ava ${dept.avaClass}" aria-hidden="true"><span class="ava-glyph">${dept.glyph}</span></span>`
+    const dotClass = contributorDepts[0] ? contributorDepts[0].avaClass : 'ava-gm';
+    const deptTagsHtml = contributorDepts.slice(0, 3).map(dept =>
+      `<span class="ava ${dept.avaClass} dlist-dept-ava" aria-hidden="true" title="${dept.name}"><span class="ava-glyph">${dept.glyph}</span></span>`
     ).join('');
+    // V37：圖示只用來快速分辨「這一列有沒有 Demo／下載」，不是裝飾用的大色塊——
+    // 有 Demo 用 🔗（不管是外部網址還是上傳的檔案），只有下載包用 📦，兩者都沒有用 📄
+    const rowIcon = d.demoUrl ? '🔗' : (d.downloadUrl ? '📦' : '📄');
     const demoBtn = d.demoUrl
-      ? `<a class="btn-preview" href="${d.demoUrl}" target="_blank" rel="noopener noreferrer">看 Demo</a>`
-      : `<button type="button" class="btn-preview is-disabled" disabled title="這個項目還沒有可預覽的 Demo 網址，等實際完成後可以在下方表單上傳，或手動把網址填進 delivery-data.js">看 Demo</button>`;
+      ? `<a class="dlist-btn dlist-btn-primary" href="${d.demoUrl}" target="_blank" rel="noopener noreferrer">看 Demo</a>`
+      : `<button type="button" class="dlist-btn dlist-btn-primary is-disabled" disabled title="這個項目還沒有可預覽的 Demo，等實際完成後可以在下方表單填網址或上傳檔案">看 Demo</button>`;
     const downloadBtn = d.downloadUrl
-      ? `<a class="btn-download" href="${d.downloadUrl}" download target="_blank" rel="noopener noreferrer">下載檔案包</a>`
-      : `<button type="button" class="btn-download is-disabled" disabled title="這個項目還沒有可下載的檔案，等實際完成後可以在下方表單上傳，或手動把連結填進 delivery-data.js">下載檔案包</button>`;
+      ? `<a class="dlist-btn" href="${d.downloadUrl}" download target="_blank" rel="noopener noreferrer">下載</a>`
+      : `<button type="button" class="dlist-btn is-disabled" disabled title="這個項目還沒有可下載的檔案，等實際完成後可以在下方表單填網址或上傳檔案">下載</button>`;
     const demoTag = d.isDemoItem ? '<i class="bc-demo-tag delivery-demo-tag">示範內容</i>' : '';
     return `
-        <div class="delivery-card">
-          <div class="delivery-thumb ${thumbClass}">${avatarsHtml}</div>
-          <div class="delivery-body">
-            <p class="delivery-name">${d.title}</p>
-            <p class="delivery-desc">${d.desc}</p>
-            <div class="delivery-meta-row">
-              <span class="delivery-badge ${d.badge}">${d.badgeLabel}</span>
-              <span class="delivery-version">${d.version || ''}</span>
-              <span class="delivery-time">${d.time || ''}${demoTag}</span>
-            </div>
-            <div class="delivery-actions">${demoBtn}${downloadBtn}</div>
+        <div class="dlist-row">
+          <span class="dlist-icon ${dotClass}" aria-hidden="true">${rowIcon}</span>
+          <div class="dlist-main">
+            <p class="dlist-title">${d.title}${demoTag}</p>
+            <p class="dlist-desc">${d.desc || ''}</p>
           </div>
+          <div class="dlist-meta">
+            <span class="delivery-badge ${d.badge}">${d.badgeLabel}</span>
+            ${deptTagsHtml}
+            <span class="dlist-time">${d.time || ''}</span>
+          </div>
+          <div class="dlist-actions">${demoBtn}${downloadBtn}</div>
         </div>`;
   }).join('\n');
 }
@@ -950,7 +953,7 @@ async function loadDeliveryState() {
         status.classList.add('is-error');
       }
       renderDelivery(demoItems, ORG_REGISTRY);
-      setDeliveryUploadEnabled(false, 'R2／KV 尚未綁定完成');
+      setDeliveryUploadEnabled(false, 'APPROVALS_KV 尚未綁定完成');
       return;
     }
     const realItems = (data.items || []).map(it => ({
@@ -962,8 +965,10 @@ async function loadDeliveryState() {
       badgeLabel: it.badgeLabel,
       version: '',
       time: it.uploadedAt ? formatDeliveryTime(it.uploadedAt) : '',
-      demoUrl: it.hasDemo ? `${base}/delivery-file?id=${encodeURIComponent(it.id)}&kind=demo` : '',
-      downloadUrl: it.hasDownload ? `${base}/delivery-file?id=${encodeURIComponent(it.id)}&kind=download` : '',
+      // V37：優先用直接填的外部網址；沒有填網址、但有上傳檔案的話，才組出
+      // /delivery-file 代理網址去 R2 撈檔案內容
+      demoUrl: it.demoUrl || (it.hasDemo ? `${base}/delivery-file?id=${encodeURIComponent(it.id)}&kind=demo` : ''),
+      downloadUrl: it.downloadUrl || (it.hasDownload ? `${base}/delivery-file?id=${encodeURIComponent(it.id)}&kind=download` : ''),
       isDemoItem: false,
     }));
     // V34：只要有任何一筆真實交付項目，就把 delivery-data.js 的示範卡片整個
@@ -994,8 +999,8 @@ function setDeliveryUploadEnabled(enabled, reason) {
   const hint = document.getElementById('deliveryUploadHint');
   if (hint) {
     hint.textContent = enabled
-      ? '選擇檔案後按下方按鈕上傳，完成後會直接出現在上方交付中心清單，不用重新整理頁面。'
-      : `目前無法上傳（${reason || '後端尚未就緒'}），請見 README「V31 設定方法」完成 R2 設定。`;
+      ? '填網址或選擇檔案都可以（Demo、下載各自獨立選擇），送出後直接出現在上方清單，不用重新整理頁面；只填網址的話不需要 R2，上傳檔案才需要。'
+      : `目前無法新增交付項目（${reason || '後端尚未就緒'}），請見 README「V20 設定方法」確認 KV 是否綁定。`;
   }
 }
 
@@ -1019,6 +1024,8 @@ if (deliveryUploadForm) {
     const verifiedEl = document.getElementById('deliveryVerifiedInput');
     const demoFileEl = document.getElementById('deliveryDemoFileInput');
     const downloadFileEl = document.getElementById('deliveryDownloadFileInput');
+    const demoUrlEl = document.getElementById('deliveryDemoUrlInput');
+    const downloadUrlEl = document.getElementById('deliveryDownloadUrlInput');
     const contributorEls = deliveryUploadForm.querySelectorAll('input[name="deliveryContributor"]:checked');
     const contributors = Array.from(contributorEls).map(el => el.value);
 
@@ -1028,14 +1035,16 @@ if (deliveryUploadForm) {
     }
     const demoFile = demoFileEl.files[0] || null;
     const downloadFile = downloadFileEl.files[0] || null;
-    if (!demoFile && !downloadFile) {
-      if (statusEl) { statusEl.textContent = 'Demo 檔案跟下載檔案包，至少要選一個。'; statusEl.classList.add('is-error'); }
+    const demoUrl = demoUrlEl.value.trim();
+    const downloadUrl = downloadUrlEl.value.trim();
+    if (!demoFile && !downloadFile && !demoUrl && !downloadUrl) {
+      if (statusEl) { statusEl.textContent = 'Demo（網址或檔案）跟下載檔案包（網址或檔案），至少要填一個。'; statusEl.classList.add('is-error'); }
       return;
     }
 
     const submitBtn = deliveryUploadForm.querySelector('button[type="submit"]');
     if (submitBtn) submitBtn.disabled = true;
-    if (statusEl) { statusEl.textContent = '上傳中，檔案較大時可能需要幾秒鐘…'; statusEl.classList.remove('is-error'); }
+    if (statusEl) { statusEl.textContent = '處理中，上傳檔案較大時可能需要幾秒鐘…'; statusEl.classList.remove('is-error'); }
 
     try {
       const payload = {
@@ -1043,6 +1052,8 @@ if (deliveryUploadForm) {
         desc: descEl.value.trim(),
         contributors,
         verified: !!(verifiedEl && verifiedEl.checked),
+        demoUrl: demoUrl || null,
+        downloadUrl: downloadUrl || null,
         demoFile: demoFile ? { name: demoFile.name, mimeType: demoFile.type || 'text/html', data: await fileToBase64(demoFile) } : null,
         downloadFile: downloadFile ? { name: downloadFile.name, mimeType: downloadFile.type || 'application/octet-stream', data: await fileToBase64(downloadFile) } : null,
       };
@@ -1054,11 +1065,11 @@ if (deliveryUploadForm) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
       deliveryUploadForm.reset();
-      if (statusEl) { statusEl.textContent = '✓ 上傳成功，已經出現在上方交付中心清單裡。'; statusEl.classList.remove('is-error'); }
+      if (statusEl) { statusEl.textContent = '✓ 已新增，出現在上方交付中心清單裡了。'; statusEl.classList.remove('is-error'); }
       await loadDeliveryState();
     } catch (err) {
-      console.error('交付項目上傳失敗：', err);
-      if (statusEl) { statusEl.textContent = `上傳失敗：${err.message || err}`; statusEl.classList.add('is-error'); }
+      console.error('交付項目新增失敗：', err);
+      if (statusEl) { statusEl.textContent = `新增失敗：${err.message || err}`; statusEl.classList.add('is-error'); }
     } finally {
       if (submitBtn) submitBtn.disabled = false;
     }

@@ -287,6 +287,12 @@ async function getGmReply(text, mediaType, files) {
     };
   } catch (err) {
     console.error('呼叫總經理 API 失敗：', err);
+    // V33：成本停損擋下的請求要讓董事長看得到真正的原因，不能被下面的示範
+    // 回覆蓋過去（那樣會誤導董事長以為總經理正常回覆了）。
+    const msg = (err && err.message) || '';
+    if (msg.includes('停損')) {
+      return { text: `⚠️ ${msg}`, risk: null, subtask: null, task: null, skipped: [] };
+    }
     return { text: `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`, risk: null, subtask: null, task: null, skipped: [] };
   }
 }
@@ -1228,3 +1234,109 @@ document.querySelectorAll('.approval-actions button').forEach(btn => {
     refreshPendingCount();
   });
 });
+
+// ---------------- V33：成本中心（月度財報員／API 成本會計＋單日／單月自動停損） ----------------
+// 讀取 Worker 累加的實際 token 用量與估算費用，畫面上顯示今日／本月兩張卡片，
+// 進度條會隨累積金額變色（超過上限變紅），並提供調整停損上限的表單。
+function fmtCostUSD(n) {
+  return `US$${Number(n || 0).toFixed(4)}`;
+}
+function fmtCostTokens(n) {
+  if (!Number.isFinite(n)) return '0';
+  if (n < 1000) return `${n}`;
+  if (n < 1000000) return `${(n / 1000).toFixed(1)}K`;
+  return `${(n / 1000000).toFixed(2)}M`;
+}
+
+async function loadCostState() {
+  const status = document.getElementById('costSyncStatus');
+  const base = apiBase();
+  if (!base) {
+    if (status) { status.textContent = '尚未設定 Worker 網址（config.js 的 GM_API_ENDPOINT 是空的），無法讀取真實成本資料。'; status.classList.add('is-error'); }
+    return;
+  }
+  try {
+    const res = await fetch(`${base}/cost-state`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+    const todayCard = document.getElementById('costCardToday');
+    const monthCard = document.getElementById('costCardMonth');
+
+    if (data.today) {
+      document.getElementById('costTodayAmount').textContent = fmtCostUSD(data.today.costUSD);
+      document.getElementById('costTodaySub').textContent = `${data.today.callCount || 0} 次呼叫・輸入 ${fmtCostTokens(data.today.inputTokens)} ／輸出 ${fmtCostTokens(data.today.outputTokens)} tokens`;
+    }
+    if (data.month) {
+      document.getElementById('costMonthAmount').textContent = fmtCostUSD(data.month.costUSD);
+      document.getElementById('costMonthSub').textContent = `${data.month.callCount || 0} 次呼叫・輸入 ${fmtCostTokens(data.month.inputTokens)} ／輸出 ${fmtCostTokens(data.month.outputTokens)} tokens`;
+    }
+    if (data.limits) {
+      document.getElementById('costTodayLimitLabel').textContent = `上限 US$${data.limits.dailyLimitUSD.toFixed(2)}`;
+      document.getElementById('costMonthLimitLabel').textContent = `上限 US$${data.limits.monthlyLimitUSD.toFixed(2)}`;
+      const dailyInput = document.getElementById('costDailyInput');
+      const monthlyInput = document.getElementById('costMonthlyInput');
+      if (dailyInput && !dailyInput.matches(':focus')) dailyInput.value = data.limits.dailyLimitUSD;
+      if (monthlyInput && !monthlyInput.matches(':focus')) monthlyInput.value = data.limits.monthlyLimitUSD;
+
+      const todayPct = Math.min(100, (data.today.costUSD / data.limits.dailyLimitUSD) * 100);
+      const monthPct = Math.min(100, (data.month.costUSD / data.limits.monthlyLimitUSD) * 100);
+      document.getElementById('costTodayBar').style.width = `${todayPct}%`;
+      document.getElementById('costMonthBar').style.width = `${monthPct}%`;
+    }
+    if (todayCard) todayCard.classList.toggle('is-stopped', !!data.dailyStopped);
+    if (monthCard) monthCard.classList.toggle('is-stopped', !!data.monthlyStopped);
+
+    if (status) {
+      if (data.dailyStopped) {
+        status.textContent = '⚠️ 已達單日停損上限，總經理目前暫停呼叫 AI，明天（UTC 零時）會自動恢復。';
+        status.classList.add('is-error');
+      } else if (data.monthlyStopped) {
+        status.textContent = '⚠️ 已達單月停損上限，總經理目前暫停呼叫 AI，下個月會自動恢復。';
+        status.classList.add('is-error');
+      } else if (data.error) {
+        status.textContent = data.error;
+        status.classList.add('is-error');
+      } else {
+        status.textContent = '已連上成本紀錄服務，以下是實際累積的估算費用（依 Gemini 回傳的 token 數換算）。';
+        status.classList.remove('is-error');
+      }
+    }
+  } catch (err) {
+    console.error('讀取成本中心資料失敗：', err);
+    if (status) { status.textContent = '目前讀不到成本資料，稍後重新整理頁面再試一次。'; status.classList.add('is-error'); }
+  }
+}
+loadCostState();
+
+const costLimitForm = document.getElementById('costLimitForm');
+if (costLimitForm) {
+  costLimitForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const base = apiBase();
+    const msg = document.getElementById('costAdminMsg');
+    if (!base) { msg.textContent = '尚未設定 Worker 網址，無法儲存。'; msg.className = 'cost-admin-msg is-error'; return; }
+    const dailyLimitUSD = parseFloat(document.getElementById('costDailyInput').value);
+    const monthlyLimitUSD = parseFloat(document.getElementById('costMonthlyInput').value);
+    const btn = costLimitForm.querySelector('button');
+    btn.disabled = true;
+    msg.textContent = '儲存中…'; msg.className = 'cost-admin-msg';
+    try {
+      const res = await fetch(`${base}/cost-set-limit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dailyLimitUSD, monthlyLimitUSD }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      msg.textContent = '✓ 停損上限已更新。';
+      msg.className = 'cost-admin-msg is-ok';
+      loadCostState();
+    } catch (err) {
+      msg.textContent = `儲存失敗：${err.message}`;
+      msg.className = 'cost-admin-msg is-error';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}

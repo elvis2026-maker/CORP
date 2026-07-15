@@ -38,6 +38,7 @@
           <a href="#delivery">📦 交付中心</a>
           <a href="#board">🗂 部門看板</a>
           <a href="#tasks">🗒️ 任務中心</a>
+          <a href="#cost-center">💰 成本中心</a>
           <a href="#overview">📊 經營指標</a>
           <a href="#org">🏢 組織架構</a>
         </nav>
@@ -290,6 +291,41 @@
       <div class="task-grid" id="taskGrid"></div>
     </section>
 
+    <!-- ================= COST CENTER（V33） ================= -->
+    <section class="cost-center" id="cost-center">
+      <div class="org-head">
+        <p class="eyebrow">Cost Center · 月度財報員／API 成本會計</p>
+        <h2>API 成本與自動停損</h2>
+        <p class="task-sync-status" id="costSyncStatus">載入中…</p>
+      </div>
+      <div class="cost-grid">
+        <div class="cost-card" id="costCardToday">
+          <p class="cost-card-title">今日累積（UTC）</p>
+          <p class="cost-amount" id="costTodayAmount">US$0.0000</p>
+          <p class="cost-sub" id="costTodaySub">0 次呼叫・0 tokens</p>
+          <div class="cost-bar"><div class="cost-bar-fill" id="costTodayBar" style="width:0%"></div></div>
+          <p class="cost-limit-label" id="costTodayLimitLabel">上限 US$2.00</p>
+        </div>
+        <div class="cost-card" id="costCardMonth">
+          <p class="cost-card-title">本月累積</p>
+          <p class="cost-amount" id="costMonthAmount">US$0.0000</p>
+          <p class="cost-sub" id="costMonthSub">0 次呼叫・0 tokens</p>
+          <div class="cost-bar"><div class="cost-bar-fill" id="costMonthBar" style="width:0%"></div></div>
+          <p class="cost-limit-label" id="costMonthLimitLabel">上限 US$30.00</p>
+        </div>
+      </div>
+      <details class="cost-admin">
+        <summary>⚙️ 調整單日／單月停損上限</summary>
+        <form id="costLimitForm" class="cost-limit-form">
+          <label>單日上限（美元）<input type="number" id="costDailyInput" min="0.01" max="100000" step="0.01" required></label>
+          <label>單月上限（美元）<input type="number" id="costMonthlyInput" min="0.01" max="100000" step="0.01" required></label>
+          <button type="submit">儲存上限</button>
+        </form>
+        <p class="cost-admin-hint">超過上限後，總經理與各部門子任務會暫停呼叫 AI，直到下一個週期自動重置（單日：UTC 零時；單月：下個月 1 號）或您在這裡調高上限。這裡顯示的費用是依 Gemini 回傳的實際 token 數乘上查到的公開牌價換算出的估算值，不是 Google 官方帳單，僅供參考；寫入端點跟其他後端設定一樣沒有身分驗證，屬於已知限制。</p>
+        <p class="cost-admin-msg" id="costAdminMsg" aria-live="polite"></p>
+      </details>
+    </section>
+
     <!-- ================= ORG STRUCTURE ================= -->
     <section class="overview" id="overview">
       <div class="org-head">
@@ -354,7 +390,7 @@
 
   <footer class="site-footer">
     <div class="plate">Elvis 程式設計 <span>· 艾維斯資訊 IT 顧問</span></div>
-    <div class="meta"><span>V32.0</span><span>2026.07.15</span></div>
+    <div class="meta"><span>V33.0</span><span>2026.07.15</span></div>
   </footer>
 
   <!-- shared gradient definition -->

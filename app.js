@@ -1164,6 +1164,8 @@ function buildTaskCardHtml(task) {
         </div>
       </details>`;
 }
+// V35：見下方 renderTasks() 尾端與 pollTaskStateIfActive() 的說明。
+let taskPollingShouldRun = false;
 function renderTasks(tasks) {
   const grid = document.getElementById('taskGrid');
   const empty = document.getElementById('taskEmpty');
@@ -1192,6 +1194,11 @@ function renderTasks(tasks) {
     summaryBar.hidden = false;
     summaryBar.innerHTML = `<span>共 <b>${tasks.length}</b> 件任務</span><span>進行中 <b>${activeTasks.length}</b> 件</span>${awaitingCount ? `<span>等您裁示 <b>${awaitingCount}</b> 件</span>` : ''}<span>平均完成度 <b>${avgPct}%</b></span>`;
   }
+  // V35：任務改成在後端背景執行（見 cloudflare-worker.js 的 V35 說明）之後，
+  // 光靠「建立/推進當下呼叫一次 loadTaskState()」不夠——後續步驟是背景慢慢
+  // 做完的，需要有東西定期重新讀一次才看得到進度真的往前走。這裡只記錄「現在
+  // 是否有任務正在 planning／in_progress」，實際輪詢邏輯在下面 pollTaskStateIfActive()。
+  taskPollingShouldRun = tasks.some(t => t.status === 'planning' || t.status === 'in_progress');
 }
 async function loadTaskState() {
   const status = document.getElementById('taskSyncStatus');
@@ -1262,6 +1269,14 @@ if (taskGridEl) {
       await loadTaskState(); // 直接整個重新讀一次任務清單，確保畫面跟後端完全一致
       loadApprovalList(); // 取消任務可能連帶關閉一張待審批項目，這裡一併刷新
       loadBoardState(); // 推進下一步如果成功執行了步驟，部門看板也要跟著更新
+      // V35：後端現在把接下來的步驟丟到背景執行（data.started 為 true），這裡
+      // 剛讀回來的狀態可能還沒反映最新進度，上面已經開始的輪詢（每 6 秒）會
+      // 自動接手更新。loadTaskState() 剛剛整個重畫過任務卡片，原本抓到的
+      // statusEl 已經是被換掉的舊節點，要重新查一次才抓得到畫面上真正顯示的那個。
+      if (data.started) {
+        const freshStatusEl = taskGridEl.querySelector(`[data-task-status-for="${taskId}"]`);
+        if (freshStatusEl) freshStatusEl.textContent = '已在背景繼續執行，過幾秒會自動更新進度…';
+      }
     } catch (err) {
       console.error(`任務${advanceBtn ? '推進' : '取消'}失敗：`, err);
       if (statusEl) {
@@ -1273,6 +1288,16 @@ if (taskGridEl) {
   });
 }
 loadTaskState();
+
+// V35：任務建立／推進後，實際自動執行是在後端背景跑的（見 cloudflare-worker.js
+// 的 continueTaskInBackground／ctx.waitUntil 說明），前端如果只在「按下當下」讀一次
+// 狀態，會看到還沒開始跑的舊資料，之後就算後端早就做完了，畫面也不會自己更新。
+// 這裡用一個很輕量的輪詢：每 6 秒檢查一次，只有「目前確實有任務在 planning／
+// in_progress」時才會真的重新呼叫 /task-list（不會平白無故一直打 API），
+// 任務都做完、卡在等董事長裁示、或取消之後，輪詢會自動停止打擾。
+setInterval(() => {
+  if (taskPollingShouldRun) loadTaskState();
+}, 6000);
 
 // ---------------- V25：讀取真實對話紀錄，取代重新整理後又變回展示訊息的問題 ----------------
 // 沒設定 Worker，或 Worker 還沒綁 KV、或這是第一次使用、還沒有任何真實對話——

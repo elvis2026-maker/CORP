@@ -201,6 +201,18 @@
     border-radius:9px; padding:9px 11px; margin:0;
   }
 
+  /* ---------- V32: 對話框裡的「已建立正式任務」提示卡片 ---------- */
+  .task-created-notice{
+    align-self:flex-start; max-width:88%; display:flex; gap:10px; align-items:flex-start;
+    background:var(--card); border:1px solid var(--line); border-left:3px solid var(--gm);
+    border-radius:12px; padding:12px 14px;
+  }
+  .task-created-icon{font-size:18px; flex-shrink:0; margin-top:1px;}
+  .task-created-title{font-size:12.5px; font-weight:700; color:var(--ink);}
+  .task-created-sub{font-size:11.5px; color:var(--ink-soft); line-height:1.6; margin-top:3px;}
+  .task-created-sub a{color:var(--violet); font-weight:600; text-decoration:none;}
+  .task-created-sub a:hover{text-decoration:underline;}
+
   .console-input{display:flex; gap:8px; padding:14px 18px; border-top:1px solid var(--line);}
   .console-input input{
     flex:1; border:1px solid var(--line-strong); border-radius:10px; padding:11px 13px;
@@ -455,6 +467,65 @@
   .bc-log-item .who{flex-shrink:0; font-weight:600; color:var(--violet); white-space:nowrap;}
   .bc-log-item .txt{color:var(--ink-soft);}
   .bc-log-item .t{flex-shrink:0; font-size:10px; color:var(--ink-faint); margin-left:auto; white-space:nowrap; padding-left:8px;}
+
+  /* ---------- V32：AI 任務管理系統（Task Center） ---------- */
+  .task-center{padding:24px 0 8px;}
+  .task-sync-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
+  .task-sync-status.is-error{color:var(--risk-high);}
+  .task-empty{margin-top:18px; font-size:12.5px; color:var(--ink-faint); line-height:1.7;}
+
+  .task-grid{margin-top:20px; display:flex; flex-direction:column; gap:14px;}
+
+  details.task-card{
+    background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md);
+    box-shadow:var(--shadow); padding:16px 18px; transition:border-color .15s ease;
+  }
+  details.task-card[open]{border-color:var(--line-strong);}
+  details.task-card summary{list-style:none; cursor:pointer;}
+  details.task-card summary::-webkit-details-marker{display:none;}
+
+  .tc-top{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .tc-name{font-family:"Noto Serif TC",serif; font-weight:700; font-size:14.5px;}
+  .tc-status{
+    margin-left:auto; display:flex; align-items:center; font-size:11px; color:var(--ink-soft);
+    white-space:nowrap; flex-shrink:0;
+  }
+  .tc-chevron{width:16px; height:16px; margin-left:6px; color:var(--ink-faint); flex-shrink:0; transition:transform .2s ease;}
+  details.task-card[open] .tc-chevron{transform:rotate(180deg); color:var(--violet);}
+  .tc-desc{font-size:12.5px; color:var(--ink-soft); margin-top:8px; line-height:1.6;}
+  .tc-bar{height:5px; border-radius:99px; background:var(--paper); border:1px solid var(--line); margin-top:10px; overflow:hidden;}
+  .tc-bar-fill{height:100%; background:var(--gm); border-radius:99px; transition:width .25s ease;}
+  .tc-meta{display:flex; justify-content:space-between; font-size:10.5px; color:var(--ink-faint); margin-top:7px; flex-wrap:wrap; gap:6px;}
+
+  .tc-steps{margin-top:14px; padding-top:14px; border-top:1px dashed var(--line); display:flex; flex-direction:column; gap:10px;}
+  .tc-step{display:flex; gap:10px; align-items:flex-start;}
+  .tc-step-icon{
+    flex-shrink:0; width:20px; height:20px; border-radius:50%; display:inline-flex; align-items:center;
+    justify-content:center; font-size:11px; font-weight:700; margin-top:1px;
+    border:1.5px solid var(--line-strong); color:var(--ink-faint);
+  }
+  .tc-step-done .tc-step-icon{background:var(--risk-low); border-color:var(--risk-low); color:#fff;}
+  .tc-step-pending .tc-step-icon{background:var(--paper);}
+  .tc-step-body{flex:1; min-width:0;}
+  .tc-step-title{font-size:12.5px; font-weight:600; color:var(--ink);}
+  .tc-step-desc{font-size:12px; color:var(--ink-soft); margin-top:2px; line-height:1.6;}
+  .tc-step-result{
+    font-size:12px; color:var(--ink-soft); margin-top:5px; padding:8px 10px; line-height:1.6;
+    background:var(--paper); border:1px solid var(--line); border-radius:9px;
+  }
+  .tc-step-result::before{content:"→ "; color:var(--violet); font-weight:700;}
+
+  .tc-actions{display:flex; gap:8px; margin-top:14px; flex-wrap:wrap;}
+  .tc-actions button{
+    font-family:inherit; font-size:12px; font-weight:600; border-radius:999px; padding:7px 16px;
+    cursor:pointer; border:1px solid var(--line-strong); background:var(--card); color:var(--ink-soft);
+    transition:opacity .15s ease;
+  }
+  .tc-actions button.tc-advance{background:var(--gm); color:#fff; border-color:var(--gm);}
+  .tc-actions button.tc-cancel:hover{border-color:var(--risk-high); color:var(--risk-high);}
+  .tc-actions button:disabled{opacity:.5; cursor:not-allowed;}
+  .tc-actions .tc-action-status{font-size:11.5px; color:var(--ink-faint); align-self:center;}
+  .tc-actions .tc-action-status.is-error{color:var(--risk-high);}
 
   /* ---------- V5: Avatar system (代表頭像 + 人性化暱稱) ---------- */
   .ava{

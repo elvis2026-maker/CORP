@@ -252,7 +252,7 @@ async function getGmReply(text, mediaType, files) {
 
   if (!endpoint) {
     // 還沒設定 Worker 網址：沿用展示用的固定回覆，網站仍然完整可用（示範回覆不附風險標示與子任務）
-    return { text: fallbackPool[Math.floor(Math.random() * fallbackPool.length)], risk: null, subtask: null, skipped: [] };
+    return { text: fallbackPool[Math.floor(Math.random() * fallbackPool.length)], risk: null, subtask: null, task: null, skipped: [] };
   }
 
   try {
@@ -282,11 +282,12 @@ async function getGmReply(text, mediaType, files) {
       text: data.reply || '（總經理這次沒有回覆內容，麻煩再問一次）',
       risk: (data.risk && data.risk.level && data.risk.reason) ? data.risk : null,
       subtask: (data.subtask && data.subtask.deptId) ? data.subtask : null,
+      task: (data.task && data.task.id) ? data.task : null,
       skipped,
     };
   } catch (err) {
     console.error('呼叫總經理 API 失敗：', err);
-    return { text: `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`, risk: null, subtask: null, skipped: [] };
+    return { text: `（目前連不上總經理的 AI 服務，先用內部判斷回覆您）${fallbackPool[0]}`, risk: null, subtask: null, task: null, skipped: [] };
   }
 }
 
@@ -481,6 +482,14 @@ form.addEventListener('submit', (e) => {
       // V23：Worker 那邊已經把這筆任務寫進部門看板的後端資料了，這裡重新讀一次
       // /board-state，讓「部門即時看板」馬上顯示剛剛發生的真實任務，不用等重新整理頁面
       loadBoardState();
+    }
+    // V32：GM 判斷這件事需要建立正式任務時（跟上面的子任務互斥，後端只會回傳其中一種），
+    // 插入一張輕量的「已建立正式任務」提示卡片，完整的步驟清單與進度顯示在下方
+    // 「任務中心」，這裡呼叫 loadTaskState() 讓那個區塊馬上顯示這筆新任務，不用等
+    // 重新整理頁面。
+    if (result.task) {
+      log.insertAdjacentHTML('beforeend', buildTaskCreatedNoticeHtml(result.task));
+      loadTaskState();
     }
 
     log.scrollTop = log.scrollHeight;
@@ -727,6 +736,20 @@ function buildSubtaskCardHtml(st) {
         <p class="subtask-result">${escapeBoardText(st.result)}</p>
       </div>`;
 }
+
+// V32：董事長交辦的事升級成正式任務時，對話框裡只顯示一張輕量的提示卡片
+// （不重複列出完整步驟——那些顯示在下方「任務中心」），提醒董事長這件事已經
+// 變成一個會被永久追蹤、可能需要好幾天跟好幾個部門一起完成的正式專案。
+function buildTaskCreatedNoticeHtml(task) {
+  return `
+      <div class="task-created-notice">
+        <span class="task-created-icon" aria-hidden="true">🗒️</span>
+        <div>
+          <p class="task-created-title">已建立正式任務：${escapeBoardText(task.title)}</p>
+          <p class="task-created-sub">預估需要跨部門／跨天完成，完整進度與步驟請見下方「任務中心」，第一步已經自動開始處理。<a href="#tasks">前往查看 →</a></p>
+        </div>
+      </div>`;
+}
 async function loadBoardState() {
   const status = document.getElementById('boardSyncStatus');
   const base = apiBase();
@@ -946,6 +969,151 @@ if (deliveryContributorList) {
 }
 loadDeliveryState();
 
+// ---------------- V32：AI 任務管理系統（Task Center） ---------------- 
+// 董事長交辦「幫我做／建立／規劃／設計／開發」這類、預估需要跨部門或跨天完成
+// 的事情時，總經理會建立一個正式 Task（跟 V22 的一次性子任務不同），永久存進
+// Cloudflare KV。這裡負責把 Task Center 的畫面渲染出來，並讓董事長可以按
+// 「推進下一步」繼續執行、或「取消任務」放棄一個還沒做完的任務。
+const TASK_STATUS_META = {
+  planning: { dot: 's-meeting', label: '規劃中' },
+  in_progress: { dot: 's-working', label: '執行中' },
+  done: { dot: 's-idle', label: '已完成' },
+  cancelled: { dot: 's-off', label: '已取消' },
+};
+function formatTaskTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
+}
+function buildTaskStepHtml(step) {
+  const icon = step.status === 'done' ? '✓' : '';
+  return `
+      <div class="tc-step tc-step-${step.status}">
+        <span class="tc-step-icon" aria-hidden="true">${icon}</span>
+        <div class="tc-step-body">
+          <p class="tc-step-title">${escapeBoardText(step.deptName)}・${escapeBoardText(step.roleNick)} ${escapeBoardText(step.roleName)}</p>
+          <p class="tc-step-desc">${escapeBoardText(step.description)}</p>
+          ${step.result ? `<p class="tc-step-result">${escapeBoardText(step.result)}</p>` : ''}
+        </div>
+      </div>`;
+}
+function buildTaskCardHtml(task) {
+  const meta = TASK_STATUS_META[task.status] || { dot: 's-idle', label: task.status };
+  const doneCount = task.steps.filter(s => s.status === 'done').length;
+  const total = task.steps.length || 1;
+  const pct = Math.round((doneCount / total) * 100);
+  const isFinished = task.status === 'done' || task.status === 'cancelled';
+  const estimatedText = task.estimatedDays ? `預估 ${task.estimatedDays} 天` : '';
+  return `
+      <details class="task-card" data-task-id="${task.id}">
+        <summary>
+          <div class="tc-top">
+            <span class="tc-name">${escapeBoardText(task.title)}</span>
+            <span class="tc-status"><span class="stat-dot ${meta.dot}"></span>${meta.label}</span>
+            <svg class="tc-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <p class="tc-desc">${escapeBoardText(task.description)}</p>
+          <div class="tc-bar"><div class="tc-bar-fill" style="width:${pct}%"></div></div>
+          <div class="tc-meta"><span>${doneCount}/${total} 步驟完成</span><span>${estimatedText}${estimatedText ? ' · ' : ''}建立於 ${formatTaskTime(task.createdAt)}</span></div>
+        </summary>
+        <div class="tc-steps">${task.steps.map(buildTaskStepHtml).join('')}</div>
+        <div class="tc-actions">
+          <button type="button" class="tc-advance" data-task-advance="${task.id}" ${isFinished ? 'disabled' : ''}>推進下一步</button>
+          <button type="button" class="tc-cancel" data-task-cancel="${task.id}" ${isFinished ? 'disabled' : ''}>取消任務</button>
+          <span class="tc-action-status" data-task-status-for="${task.id}"></span>
+        </div>
+      </details>`;
+}
+function renderTasks(tasks) {
+  const grid = document.getElementById('taskGrid');
+  const empty = document.getElementById('taskEmpty');
+  if (!grid) return;
+  if (!tasks.length) {
+    grid.innerHTML = '';
+    if (empty) empty.hidden = false;
+    return;
+  }
+  if (empty) empty.hidden = true;
+  grid.innerHTML = tasks.map(buildTaskCardHtml).join('\n');
+}
+async function loadTaskState() {
+  const status = document.getElementById('taskSyncStatus');
+  const base = apiBase();
+  if (!base) {
+    if (status) {
+      status.textContent = '尚未設定 Worker 網址，任務中心暫時無法使用。';
+      status.classList.add('is-error');
+    }
+    renderTasks([]);
+    return;
+  }
+  try {
+    const res = await fetch(`${base}/task-list`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (data.error && (!data.tasks || !data.tasks.length)) {
+      if (status) {
+        status.textContent = data.error;
+        status.classList.add('is-error');
+      }
+      renderTasks([]);
+      return;
+    }
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    renderTasks(tasks);
+    if (status) {
+      status.textContent = tasks.length
+        ? `已連上任務資料庫（Cloudflare KV）：共 ${tasks.length} 筆正式任務，跨天、跨部門的進度都會保留。`
+        : '已連上任務資料庫（Cloudflare KV），目前還沒有任何正式任務。';
+      status.classList.remove('is-error');
+    }
+  } catch (err) {
+    console.error('讀取任務清單失敗：', err);
+    if (status) {
+      status.textContent = '目前連不上任務資料庫，稍後重新整理頁面再試一次。';
+      status.classList.add('is-error');
+    }
+  }
+}
+
+// 事件委派：「推進下一步」「取消任務」按鈕都是動態產生的，用一個綁在容器上的
+// listener 處理，不用每次重新渲染後再重新綁定一次。
+const taskGridEl = document.getElementById('taskGrid');
+if (taskGridEl) {
+  taskGridEl.addEventListener('click', async (e) => {
+    const advanceBtn = e.target.closest('[data-task-advance]');
+    const cancelBtn = e.target.closest('[data-task-cancel]');
+    const btn = advanceBtn || cancelBtn;
+    if (!btn) return;
+    e.preventDefault(); // details/summary 點擊不會誤觸開合（按鈕本身不在 summary 裡，但保險起見擋掉冒泡的預設行為）
+    const taskId = advanceBtn ? advanceBtn.dataset.taskAdvance : cancelBtn.dataset.taskCancel;
+    const statusEl = taskGridEl.querySelector(`[data-task-status-for="${taskId}"]`);
+    const base = apiBase();
+    if (!base) return;
+    const endpoint = advanceBtn ? 'task-advance' : 'task-cancel';
+    const busyText = advanceBtn ? '執行中，可能需要幾秒鐘…' : '取消中…';
+    if (statusEl) { statusEl.textContent = busyText; statusEl.classList.remove('is-error'); }
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${base}/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      await loadTaskState(); // 直接整個重新讀一次任務清單，確保畫面跟後端完全一致
+    } catch (err) {
+      console.error(`任務${advanceBtn ? '推進' : '取消'}失敗：`, err);
+      if (statusEl) {
+        statusEl.textContent = `${advanceBtn ? '推進失敗' : '取消失敗'}：${err.message || err}`;
+        statusEl.classList.add('is-error');
+      }
+      btn.disabled = false;
+    }
+  });
+}
+loadTaskState();
+
 // ---------------- V25：讀取真實對話紀錄，取代重新整理後又變回展示訊息的問題 ----------------
 // 沒設定 Worker，或 Worker 還沒綁 KV、或這是第一次使用、還沒有任何真實對話——
 // 這幾種情況都直接維持 index.html 裡原本寫死的展示對話（晨報卡片＋兩輪示範對話），
@@ -960,11 +1128,15 @@ loadDeliveryState();
 // 範圍老實說清楚：這裡只還原「文字對話」與風險標示、以及委派子任務的執行結果卡片，
 // 不會還原之前對話裡附過的圖片／影片縮圖——附件的實際檔案內容從來沒有被送到任何
 // 後端保存過，這是仍然存在的已知限制，不是這次沒做好。
-function buildGmHistoryMessageHtml(text, risk, subtask) {
+function buildGmHistoryMessageHtml(text, risk, subtask, taskRef) {
   const riskBadge = risk
     ? `<span class="risk risk-${risk.level}" title="${String(risk.reason || '').replace(/"/g,'&quot;')}">${RISK_LABEL[risk.level] || '風險'}</span> `
     : '';
   const subtaskHtml = subtask ? buildSubtaskCardHtml(subtask) : '';
+  // V32：對話紀錄裡存的只是任務的輕量參照（id／標題），這裡用同一個
+  // buildTaskCreatedNoticeHtml() 樣板重建提示卡片，完整步驟內容由任務中心自己
+  // 讀 /task-list 顯示，不需要對話紀錄裡也存一份完整資料。
+  const taskHtml = taskRef ? buildTaskCreatedNoticeHtml(taskRef) : '';
   return `
       <div class="msg msg-gm">
         <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
@@ -973,7 +1145,7 @@ function buildGmHistoryMessageHtml(text, risk, subtask) {
           <p>${riskBadge}${escapeBoardText(text)}</p>
           ${risk ? `<p class="gm-risk-reason">風控官（小控）：${escapeBoardText(risk.reason)}</p>` : ''}
         </div>
-      </div>${subtaskHtml}`;
+      </div>${subtaskHtml}${taskHtml}`;
 }
 function buildUserHistoryMessageHtml(text) {
   return `
@@ -992,9 +1164,9 @@ async function loadChatHistory() {
     const res = await fetch(`${base}/chat-history`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.error || !Array.isArray(data.messages) || data.messages.length === 0) return; // 沒有真實紀錄：維持展示對話
-    document.querySelectorAll('#consoleLog .msg, #consoleLog .subtask-card').forEach(el => el.remove()); // 晨報卡片（.briefing-card）保留，只清掉對話訊息與委派結果卡片
+    document.querySelectorAll('#consoleLog .msg, #consoleLog .subtask-card, #consoleLog .task-created-notice').forEach(el => el.remove()); // 晨報卡片（.briefing-card）保留，只清掉對話訊息與委派結果／任務提示卡片
     const html = data.messages.map(m => (
-      m.role === 'model' ? buildGmHistoryMessageHtml(m.text, m.risk, m.subtask) : buildUserHistoryMessageHtml(m.text)
+      m.role === 'model' ? buildGmHistoryMessageHtml(m.text, m.risk, m.subtask, m.task) : buildUserHistoryMessageHtml(m.text)
     )).join('');
     log.insertAdjacentHTML('beforeend', html);
     log.scrollTop = log.scrollHeight;

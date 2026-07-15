@@ -37,6 +37,7 @@
           <a href="#approval">📋 待審批 <b id="pendingCountNav">3</b></a>
           <a href="#delivery">📦 交付中心</a>
           <a href="#board">🗂 部門看板</a>
+          <a href="#tasks">🗒️ 任務中心</a>
           <a href="#overview">📊 經營指標</a>
           <a href="#org">🏢 組織架構</a>
         </nav>
@@ -271,6 +272,24 @@
       </div>
     </section>
 
+    <!-- ================= TASK CENTER (AI 任務管理系統) ================= -->
+    <section class="task-center" id="tasks">
+      <div class="org-head">
+        <p class="eyebrow">Task Center · AI 任務管理系統</p>
+        <h2>正式任務清單</h2>
+        <p class="board-legend">
+          <span><span class="stat-dot s-meeting"></span>規劃中</span>
+          <span><span class="stat-dot s-working"></span>執行中</span>
+          <span><span class="stat-dot s-idle"></span>已完成</span>
+          <span><span class="stat-dot s-off"></span>已取消</span>
+          <span style="margin-left:auto; color:var(--ink-faint);">點卡片展開任務步驟</span>
+        </p>
+        <p class="task-sync-status" id="taskSyncStatus">載入中…</p>
+      </div>
+      <p class="task-empty" id="taskEmpty" hidden>目前沒有正式任務。當董事長交辦「幫我做／建立／規劃／設計／開發」某件預估需要跨部門或跨天才能完成的事情時，總經理會在這裡建立正式任務，一次性的小事仍會用子任務快速處理，不會出現在這裡。</p>
+      <div class="task-grid" id="taskGrid"></div>
+    </section>
+
     <!-- ================= ORG STRUCTURE ================= -->
     <section class="overview" id="overview">
       <div class="org-head">
@@ -335,7 +354,7 @@
 
   <footer class="site-footer">
     <div class="plate">Elvis 程式設計 <span>· 艾維斯資訊 IT 顧問</span></div>
-    <div class="meta"><span>V31.0</span><span>2026.07.14</span></div>
+    <div class="meta"><span>V32.0</span><span>2026.07.15</span></div>
   </footer>
 
   <!-- shared gradient definition -->

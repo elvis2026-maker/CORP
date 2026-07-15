@@ -496,6 +496,8 @@ form.addEventListener('submit', (e) => {
     if (result.task) {
       log.insertAdjacentHTML('beforeend', buildTaskCreatedNoticeHtml(result.task));
       loadTaskState();
+      loadApprovalList(); // 建立當下如果第一步就需要裁示，這裡會馬上出現在待您核准
+      loadBoardState(); // 自動執行的步驟如果已經完成，部門看板也要跟著更新
     }
 
     log.scrollTop = log.scrollHeight;
@@ -539,14 +541,23 @@ function hireIntoOrg(deptId, role) {
 const pendingCountEl = document.getElementById('pendingCount');
 const pendingCountNavEl = document.getElementById('pendingCountNav');
 const approvalEmpty = document.getElementById('approvalEmpty');
-let pendingCount = document.querySelectorAll('.approval-card').length;
 
-function refreshPendingCount(){
-  if (pendingCountEl) pendingCountEl.textContent = pendingCount;
-  if (pendingCountNavEl) pendingCountNavEl.textContent = pendingCount;
-  if (pendingCount === 0 && approvalEmpty) approvalEmpty.classList.add('show');
+// V34：待審批數字改成「即時從畫面上算」，不再用一個手動加減的變數維護——
+// 一旦有真實的待審批項目（#approvalDynamicList 裡面的卡片），示範卡片會被藏起來，
+// 這時候待辦數字只算真實項目；沒有真實項目時，才算示範卡片裡還沒處理的那幾張。
+// 這樣不管卡片是怎麼被解決的（示範卡片手動點擊、真實項目呼叫 /approval-decide、
+// 或是取消任務時連帶關閉待審批項目），數字永遠對得上畫面上實際看到的卡片數。
+function updatePendingCountFromDom() {
+  const dynamicCount = document.querySelectorAll('#approvalDynamicList .approval-card').length;
+  const count = dynamicCount > 0
+    ? dynamicCount
+    : document.querySelectorAll('.approval-card-demo:not(.is-resolved)').length;
+  if (pendingCountEl) pendingCountEl.textContent = count;
+  if (pendingCountNavEl) pendingCountNavEl.textContent = count;
+  if (approvalEmpty) approvalEmpty.classList.toggle('show', count === 0);
+  return count;
 }
-refreshPendingCount(); // 頁面載入時就同步一次，數字永遠等於實際卡片數，不用手動維護
+updatePendingCountFromDom(); // 頁面載入時就同步一次
 
 // ---------------- V20：待審批核准／退回／加問動作串接後端（Cloudflare KV）----------------
 // 跟總經理對話共用同一支 Worker，多開兩個路徑：
@@ -582,6 +593,88 @@ async function submitApprovalDecision(cardId, caseTitle, action, resultNote) {
   } catch (err) {
     console.error('待審批核准/退回動作寫入後端失敗：', err);
     return { ok: false, reason: 'request-failed', detail: String(err) };
+  }
+}
+
+// ---------------- V34：真正資料驅動的待審批清單 ----------------
+// 跟固定的 3 張示範卡片不同，這裡的項目是總經理執行正式任務時，遇到需要董事長
+// 裁示的步驟才會真的產生（見 cloudflare-worker.js 的 runTaskStepsFrom／
+// createApprovalItem）。一旦有任何一筆真實項目，畫面會把 3 張示範卡片藏起來，
+// 只顯示真實的——這是回應「待你核准只要有真實資料進來就把假資料隱藏」的具體做法。
+function formatApprovalTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
+}
+function buildApprovalItemCardHtml(item) {
+  const askHistoryHtml = (item.askNotes && item.askNotes.length)
+    ? `<p class="approval-ask-history">您先前問過：${item.askNotes.map(a => escapeBoardText(a.note || '')).join('；')}</p>`
+    : '';
+  return `
+        <div class="approval-card" data-dynamic="true" data-risk="mid" id="${item.id}">
+          <div class="approval-top">
+            <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
+            <div>
+              <p class="approval-case">${escapeBoardText(item.caseTitle)}</p>
+              <p class="approval-tag is-task-linked">來自任務中心・${escapeBoardText(item.taskId)}　·　${formatApprovalTime(item.createdAt)}</p>
+            </div>
+            <span class="risk risk-mid" style="margin-left:auto;">需要裁示</span>
+          </div>
+          <p class="approval-summary">${escapeBoardText(item.summary)}</p>
+          <div class="approval-who">
+            <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
+            <span>${escapeBoardText(item.reason)}</span>
+          </div>
+          ${askHistoryHtml}
+          <div class="approval-actions">
+            <button type="button" class="btn-approve" data-act="approve" data-target="${item.id}">核准，繼續執行</button>
+            <button type="button" class="btn-ask" data-act="ask" data-target="${item.id}">再問清楚一點</button>
+            <button type="button" class="btn-reject" data-act="reject" data-target="${item.id}">退回，跳過這步</button>
+          </div>
+          <p class="approval-resolved-note"></p>
+        </div>`;
+}
+async function submitApprovalItemDecision(id, action, note) {
+  const base = apiBase();
+  if (!base) return { ok: false, reason: 'no-endpoint' };
+  try {
+    const res = await fetch(`${base}/approval-decide`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action, note: note || '' }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return { ok: true, item: data.item, task: data.task };
+  } catch (err) {
+    console.error('待審批項目決定寫入後端失敗：', err);
+    return { ok: false, reason: 'request-failed', detail: String(err) };
+  }
+}
+async function loadApprovalList() {
+  const status = document.getElementById('approvalSyncStatus');
+  const dynamicList = document.getElementById('approvalDynamicList');
+  const base = apiBase();
+  if (!base || !dynamicList) return;
+  try {
+    const res = await fetch(`${base}/approval-list`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const items = Array.isArray(data.items) ? data.items : [];
+    dynamicList.innerHTML = items.map(buildApprovalItemCardHtml).join('\n');
+    // 有真實項目時，把 3 張示範卡片藏起來；沒有真實項目時，示範卡片照常顯示
+    // （示範內容的作用是讓網站在還沒有真實資料時，也能示範這個功能長什麼樣子）
+    document.querySelectorAll('.approval-card-demo').forEach(card => {
+      card.classList.toggle('is-hidden-by-real', items.length > 0);
+    });
+    if (status) {
+      status.textContent = items.length > 0
+        ? `已連上任務系統的真實待審批項目（${items.length} 筆），以上示範卡片已隱藏。`
+        : (data.error || '');
+      status.classList.toggle('is-error', !!data.error && items.length === 0);
+    }
+    updatePendingCountFromDom();
+  } catch (err) {
+    console.error('讀取待審批清單失敗：', err);
   }
 }
 
@@ -663,8 +756,7 @@ function applyHistoryToCards(records) {
     }
   });
   // 卡片狀態可能被上面改動，重新算一次「待您核准」的實際數字，不能再假設每張卡片都還沒處理
-  pendingCount = document.querySelectorAll('.approval-card:not(.is-resolved)').length;
-  refreshPendingCount();
+  updatePendingCountFromDom();
 }
 
 async function loadApprovalHistory() {
@@ -751,8 +843,8 @@ function buildTaskCreatedNoticeHtml(task) {
       <div class="task-created-notice">
         <span class="task-created-icon" aria-hidden="true">🗒️</span>
         <div>
-          <p class="task-created-title">已建立正式任務：${escapeBoardText(task.title)}</p>
-          <p class="task-created-sub">預估需要跨部門／跨天完成，完整進度與步驟請見下方「任務中心」，第一步已經自動開始處理。<a href="#tasks">前往查看 →</a></p>
+          <p class="task-created-title">已建立正式任務 ${escapeBoardText(task.id)}：${escapeBoardText(task.title)}</p>
+          <p class="task-created-sub">總經理會自動一路往下執行，需要您裁示的步驟會出現在上方「待您核准」；完整進度請見「任務中心」。<a href="#tasks">前往查看 →</a></p>
         </div>
       </div>`;
 }
@@ -801,6 +893,10 @@ async function loadBoardState() {
     });
     renderBoard(ORG_REGISTRY);
     bindBoardAccordion();
+    // V34：部門看板同步完成後，ORG_REGISTRY 的 board.statusDot／statusLabel
+    // 是最新的了，重新渲染一次任務中心，讓每個步驟旁邊的部門狀態跟著更新——
+    // 不然任務卡片會一直顯示頁面剛載入那一刻的舊狀態。
+    if (typeof loadTaskState === 'function') loadTaskState();
     if (status) {
       status.textContent = realCount > 0
         ? `已連上部門任務資料庫（Cloudflare KV）：${realCount} 個部門有真實任務紀錄，其餘部門顯示 org-data.js 的示範內容。`
@@ -870,10 +966,12 @@ async function loadDeliveryState() {
       downloadUrl: it.hasDownload ? `${base}/delivery-file?id=${encodeURIComponent(it.id)}&kind=download` : '',
       isDemoItem: false,
     }));
-    renderDelivery([...realItems, ...demoItems], ORG_REGISTRY);
+    // V34：只要有任何一筆真實交付項目，就把 delivery-data.js 的示範卡片整個
+    // 藏起來，不再兩者並列——呼應「所有寫死假資料的部分，只要有真實資料就隱藏」。
+    renderDelivery(realItems.length > 0 ? realItems : demoItems, ORG_REGISTRY);
     if (status) {
       status.textContent = realItems.length > 0
-        ? `已連上真實交付檔案儲存（Cloudflare R2）：${realItems.length} 筆真實交付項目，其餘為 delivery-data.js 的示範內容。`
+        ? `已連上真實交付檔案儲存（Cloudflare R2）：${realItems.length} 筆真實交付項目，delivery-data.js 的示範內容已隱藏。`
         : '已連上真實交付檔案儲存（Cloudflare R2），目前還沒有任何真實上傳過的項目，以下先顯示示範內容，可以用下方表單上傳第一筆。';
       status.classList.remove('is-error');
     }
@@ -978,26 +1076,52 @@ loadDeliveryState();
 // ---------------- V32：AI 任務管理系統（Task Center） ---------------- 
 // 董事長交辦「幫我做／建立／規劃／設計／開發」這類、預估需要跨部門或跨天完成
 // 的事情時，總經理會建立一個正式 Task（跟 V22 的一次性子任務不同），永久存進
-// Cloudflare KV。這裡負責把 Task Center 的畫面渲染出來，並讓董事長可以按
-// 「推進下一步」繼續執行、或「取消任務」放棄一個還沒做完的任務。
+// Cloudflare KV。這裡負責把 Task Center 的畫面渲染出來。
+// V34：總經理現在會自動一路往下執行任務步驟，不再需要董事長每一步都手動推進——
+// 「推進下一步」只保留給「某步執行失敗」時的手動重試；真正需要董事長裁示的步驟，
+// 會變成「等您裁示」狀態，卡片會提示去上面的「待您核准」處理，不是按這裡的按鈕。
 const TASK_STATUS_META = {
   planning: { dot: 's-meeting', label: '規劃中' },
   in_progress: { dot: 's-working', label: '執行中' },
+  awaiting_approval: { dot: 's-await', label: '等您裁示' },
   done: { dot: 's-idle', label: '已完成' },
+  blocked: { dot: 's-blocked', label: '已卡關' },
   cancelled: { dot: 's-off', label: '已取消' },
 };
 function formatTaskTime(iso) {
   if (!iso) return '';
   try { return new Date(iso).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
 }
+// V34：讀 ORG_REGISTRY 目前的部門狀態（由 loadBoardState() 隨時同步），讓任務
+// 步驟旁邊看得到「這個部門現在的上班狀況」，不會顯示跟部門看板對不上的舊資料——
+// 這是修正「進到任務清單後，各部門上班狀況都不會同步更新」的畫面呈現這一半，
+// 後端那一半是任務步驟執行時也會寫進部門看板（見 cloudflare-worker.js persistBoardTask）。
+function getDeptLiveStatus(deptId) {
+  const dept = ORG_REGISTRY.find(r => r.id === deptId);
+  if (!dept || !dept.board) return null;
+  return { dot: dept.board.statusDot || 's-idle', label: dept.board.statusLabel || '' };
+}
 function buildTaskStepHtml(step) {
-  const icon = step.status === 'done' ? '✓' : '';
+  const icon = step.status === 'done' ? '✓' : (step.status === 'rejected' ? '✕' : '');
+  const liveStatus = getDeptLiveStatus(step.deptId);
+  const liveStatusHtml = liveStatus
+    ? `<span class="tc-step-dept-status"><span class="stat-dot ${liveStatus.dot}"></span>${escapeBoardText(liveStatus.label)}</span>`
+    : '';
+  let noteHtml = '';
+  if (step.status === 'awaiting_approval') {
+    noteHtml = `<p class="tc-step-note">⏸ 正在等董事長於「待您核准」裁示${step.approvalReason ? '：' + escapeBoardText(step.approvalReason) : ''}</p>`;
+  } else if (step.status === 'rejected') {
+    noteHtml = `<p class="tc-step-note is-rejected">✕ 董事長已退回這一步，任務繼續往下一步進行</p>`;
+  } else if (step.approvedButFailed) {
+    noteHtml = `<p class="tc-step-note is-rejected">董事長已核准，但這次執行失敗，可按下方「推進下一步」重試</p>`;
+  }
   return `
       <div class="tc-step tc-step-${step.status}">
         <span class="tc-step-icon" aria-hidden="true">${icon}</span>
         <div class="tc-step-body">
-          <p class="tc-step-title">${escapeBoardText(step.deptName)}・${escapeBoardText(step.roleNick)} ${escapeBoardText(step.roleName)}</p>
+          <p class="tc-step-title">${escapeBoardText(step.deptName)}・${escapeBoardText(step.roleNick)} ${escapeBoardText(step.roleName)}${liveStatusHtml}</p>
           <p class="tc-step-desc">${escapeBoardText(step.description)}</p>
+          ${noteHtml}
           ${step.result ? `<p class="tc-step-result">${escapeBoardText(step.result)}</p>` : ''}
         </div>
       </div>`;
@@ -1007,24 +1131,35 @@ function buildTaskCardHtml(task) {
   const doneCount = task.steps.filter(s => s.status === 'done').length;
   const total = task.steps.length || 1;
   const pct = Math.round((doneCount / total) * 100);
-  const isFinished = task.status === 'done' || task.status === 'cancelled';
+  const isTerminal = task.status === 'done' || task.status === 'cancelled';
+  const isAwaitingApproval = task.status === 'awaiting_approval';
+  const hasRetriableStep = task.steps.some(s => s.status === 'pending');
+  const canAdvance = !isTerminal && !isAwaitingApproval && hasRetriableStep;
   const estimatedText = task.estimatedDays ? `預估 ${task.estimatedDays} 天` : '';
+  const advanceHint = isAwaitingApproval
+    ? `<span class="tc-action-hint">請到上方「待您核准」裁示 →</span>`
+    : '';
   return `
-      <details class="task-card" data-task-id="${task.id}">
+      <details class="task-card" data-task-id="${task.id}" data-status="${task.status}">
         <summary>
           <div class="tc-top">
+            <span class="tc-id">${escapeBoardText(task.id)}</span>
             <span class="tc-name">${escapeBoardText(task.title)}</span>
             <span class="tc-status"><span class="stat-dot ${meta.dot}"></span>${meta.label}</span>
             <svg class="tc-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M5 7.5L10 12.5L15 7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </div>
           <p class="tc-desc">${escapeBoardText(task.description)}</p>
-          <div class="tc-bar"><div class="tc-bar-fill" style="width:${pct}%"></div></div>
+          <div class="tc-bar-row">
+            <div class="tc-bar"><div class="tc-bar-fill" style="width:${pct}%"></div></div>
+            <span class="tc-pct">${pct}%</span>
+          </div>
           <div class="tc-meta"><span>${doneCount}/${total} 步驟完成</span><span>${estimatedText}${estimatedText ? ' · ' : ''}建立於 ${formatTaskTime(task.createdAt)}</span></div>
         </summary>
         <div class="tc-steps">${task.steps.map(buildTaskStepHtml).join('')}</div>
         <div class="tc-actions">
-          <button type="button" class="tc-advance" data-task-advance="${task.id}" ${isFinished ? 'disabled' : ''}>推進下一步</button>
-          <button type="button" class="tc-cancel" data-task-cancel="${task.id}" ${isFinished ? 'disabled' : ''}>取消任務</button>
+          <button type="button" class="tc-advance" data-task-advance="${task.id}" ${canAdvance ? '' : 'disabled'}>推進下一步</button>
+          <button type="button" class="tc-cancel" data-task-cancel="${task.id}" ${isTerminal ? 'disabled' : ''}>取消任務</button>
+          ${advanceHint}
           <span class="tc-action-status" data-task-status-for="${task.id}"></span>
         </div>
       </details>`;
@@ -1032,14 +1167,31 @@ function buildTaskCardHtml(task) {
 function renderTasks(tasks) {
   const grid = document.getElementById('taskGrid');
   const empty = document.getElementById('taskEmpty');
+  const summaryBar = document.getElementById('taskSummaryBar');
   if (!grid) return;
   if (!tasks.length) {
     grid.innerHTML = '';
     if (empty) empty.hidden = false;
+    if (summaryBar) summaryBar.hidden = true;
     return;
   }
   if (empty) empty.hidden = true;
   grid.innerHTML = tasks.map(buildTaskCardHtml).join('\n');
+  // V34：任務中心移到跟總經理下指令下方後，這裡加一行彙總數字，
+  // 不用展開每張卡片也能一眼看到「現在還有幾件在動、平均做到幾%了」
+  if (summaryBar) {
+    const activeTasks = tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');
+    const awaitingCount = tasks.filter(t => t.status === 'awaiting_approval').length;
+    const avgPct = tasks.length
+      ? Math.round(tasks.reduce((sum, t) => {
+          const total = t.steps.length || 1;
+          const done = t.steps.filter(s => s.status === 'done').length;
+          return sum + (done / total) * 100;
+        }, 0) / tasks.length)
+      : 0;
+    summaryBar.hidden = false;
+    summaryBar.innerHTML = `<span>共 <b>${tasks.length}</b> 件任務</span><span>進行中 <b>${activeTasks.length}</b> 件</span>${awaitingCount ? `<span>等您裁示 <b>${awaitingCount}</b> 件</span>` : ''}<span>平均完成度 <b>${avgPct}%</b></span>`;
+  }
 }
 async function loadTaskState() {
   const status = document.getElementById('taskSyncStatus');
@@ -1108,6 +1260,8 @@ if (taskGridEl) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
       await loadTaskState(); // 直接整個重新讀一次任務清單，確保畫面跟後端完全一致
+      loadApprovalList(); // 取消任務可能連帶關閉一張待審批項目，這裡一併刷新
+      loadBoardState(); // 推進下一步如果成功執行了步驟，部門看板也要跟著更新
     } catch (err) {
       console.error(`任務${advanceBtn ? '推進' : '取消'}失敗：`, err);
       if (statusEl) {
@@ -1184,14 +1338,63 @@ async function loadChatHistory() {
 }
 loadChatHistory();
 
-document.querySelectorAll('.approval-actions button').forEach(btn => {
-  btn.addEventListener('click', async () => {
+// V34：改成事件代理（綁在 #approvalList 這個共同的父層容器上），而不是替
+// 每一顆按鈕個別綁定——因為真實的待審批卡片是 loadApprovalList() 動態插入
+// 畫面的，如果還是用「頁面載入當下 querySelectorAll 一次」的寫法，動態卡片
+// 上的按鈕永遠不會被綁定，點了完全沒反應。這裡同時涵蓋 3 張示範卡片跟
+// 真實卡片兩種情況，用卡片是否有 data-dynamic="true" 決定要呼叫哪一支後端路徑。
+const approvalListEl = document.getElementById('approvalList');
+if (approvalListEl) {
+  approvalListEl.addEventListener('click', async (e) => {
+    const btn = e.target.closest('.approval-actions button');
+    if (!btn) return;
     const card = document.getElementById(btn.dataset.target);
     if (!card || card.classList.contains('is-resolved')) return;
     const act = btn.dataset.act;
     const note = card.querySelector('.approval-resolved-note');
     const caseTitle = card.querySelector('.approval-case')?.textContent?.trim() || card.id;
+    const isDynamic = card.dataset.dynamic === 'true';
 
+    if (isDynamic) {
+      // ---- 真實項目：呼叫 /approval-decide，核准／退回會讓後端接著自動把
+      // 任務往下推進，「加問」則會保留這張項目繼續待在清單裡，不會消失 ----
+      btn.closest('.approval-actions').querySelectorAll('button').forEach(b => b.disabled = true);
+      let noteText = act === 'ask' ? '正在送出您的提問…' : '處理中，可能需要幾秒鐘…';
+      if (note) { note.className = 'approval-resolved-note show'; note.style.color = 'var(--ink-faint)'; note.textContent = noteText; }
+      let askNote = '';
+      if (act === 'ask') {
+        askNote = window.prompt('想請總經理補充什麼資訊？（會記錄進歷史紀錄，這個項目會繼續留著等您決定）', '') || '';
+      }
+      const outcome = await submitApprovalItemDecision(card.id, act, askNote);
+      if (outcome.ok) {
+        if (act === 'ask') {
+          // 加問不會終結這張項目，重新整個清單一次，讓「您先前問過」的內容顯示出來
+          await loadApprovalList();
+        } else {
+          card.classList.add('is-resolved');
+          if (note) {
+            const cls = act === 'approve' ? 'ok' : 'no';
+            note.className = `approval-resolved-note show ${cls}`;
+            const prefix = act === 'approve' ? '✓ ' : '✕ ';
+            note.textContent = `${prefix}已${act === 'approve' ? '核准' : '退回'}，總經理會接著自動處理後續步驟（已存入後端歷史紀錄）`;
+          }
+          await loadApprovalList(); // 這張項目已經 resolved，重新讀一次會讓它從清單消失
+        }
+        loadTaskState(); // 核准／退回可能讓任務往下推進了，重新整理任務中心
+        loadBoardState(); // 核准的步驟如果真的執行了，部門看板也要跟著更新
+        loadApprovalHistory();
+      } else if (note) {
+        note.className = 'approval-resolved-note show';
+        note.style.color = 'var(--risk-high)';
+        note.textContent = outcome.reason === 'no-endpoint'
+          ? '尚未設定後端 Worker 網址，無法處理這筆項目'
+          : '處理失敗，請稍後再試一次';
+        btn.closest('.approval-actions').querySelectorAll('button').forEach(b => b.disabled = false);
+      }
+      return;
+    }
+
+    // ---- 示範卡片：維持原本 V20 以來的行為，寫入 /approval-action ----
     // 先鎖住卡片、按鈕，避免使用者連點造成重複送出
     card.classList.add('is-resolved');
     card.querySelectorAll('.approval-actions button').forEach(b => b.disabled = true);
@@ -1230,10 +1433,10 @@ document.querySelectorAll('.approval-actions button').forEach(btn => {
       note.textContent = prefix + resultText + '（寫入後端失敗，這筆決定暫時只顯示在畫面上，請稍後重新整理頁面再試一次）';
     }
 
-    pendingCount = Math.max(0, pendingCount - 1);
-    refreshPendingCount();
+    updatePendingCountFromDom();
   });
-});
+}
+loadApprovalList();
 
 // ---------------- V33：成本中心（月度財報員／API 成本會計＋單日／單月自動停損） ----------------
 // 讀取 Worker 累加的實際 token 用量與估算費用，畫面上顯示今日／本月兩張卡片，

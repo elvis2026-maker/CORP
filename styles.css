@@ -418,6 +418,8 @@
   .stat-dot.s-meeting{background:var(--risk-mid); box-shadow:0 0 0 3px var(--risk-mid-bg);}
   .stat-dot.s-idle{background:var(--ink-faint); box-shadow:0 0 0 3px var(--line);}
   .stat-dot.s-off{background:transparent; border:1.5px solid var(--line-strong);}
+  .stat-dot.s-await{background:var(--violet); box-shadow:0 0 0 3px rgba(37,99,235,.18);}
+  .stat-dot.s-blocked{background:var(--risk-high); box-shadow:0 0 0 3px var(--risk-high-bg);}
 
   .board-grid{
     margin-top:24px; display:grid; gap:14px; grid-template-columns:1fr;
@@ -474,6 +476,14 @@
   .task-sync-status.is-error{color:var(--risk-high);}
   .task-empty{margin-top:18px; font-size:12.5px; color:var(--ink-faint); line-height:1.7;}
 
+  /* V34：任務中心整區移到跟總經理下指令下方後，這裡加一行彙總數字，
+     不用展開每張卡片也能一眼看到「現在還有幾件在動、平均做到幾%了」 */
+  .task-summary-bar{
+    margin-top:12px; display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--ink-soft);
+    background:var(--paper); border:1px solid var(--line); border-radius:9px; padding:9px 14px;
+  }
+  .task-summary-bar b{color:var(--ink); font-weight:700;}
+
   .task-grid{margin-top:20px; display:flex; flex-direction:column; gap:14px;}
 
   details.task-card{
@@ -481,10 +491,16 @@
     box-shadow:var(--shadow); padding:16px 18px; transition:border-color .15s ease;
   }
   details.task-card[open]{border-color:var(--line-strong);}
+  details.task-card[data-status="awaiting_approval"]{border-color:var(--violet);}
+  details.task-card[data-status="blocked"]{border-color:var(--risk-high);}
   details.task-card summary{list-style:none; cursor:pointer;}
   details.task-card summary::-webkit-details-marker{display:none;}
 
   .tc-top{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .tc-id{
+    font-size:10.5px; font-weight:700; color:var(--ink-faint); letter-spacing:.02em;
+    background:var(--paper); border:1px solid var(--line); border-radius:6px; padding:2px 7px;
+  }
   .tc-name{font-family:"Noto Serif TC",serif; font-weight:700; font-size:14.5px;}
   .tc-status{
     margin-left:auto; display:flex; align-items:center; font-size:11px; color:var(--ink-soft);
@@ -493,8 +509,10 @@
   .tc-chevron{width:16px; height:16px; margin-left:6px; color:var(--ink-faint); flex-shrink:0; transition:transform .2s ease;}
   details.task-card[open] .tc-chevron{transform:rotate(180deg); color:var(--violet);}
   .tc-desc{font-size:12.5px; color:var(--ink-soft); margin-top:8px; line-height:1.6;}
-  .tc-bar{height:5px; border-radius:99px; background:var(--paper); border:1px solid var(--line); margin-top:10px; overflow:hidden;}
+  .tc-bar-row{display:flex; align-items:center; gap:8px; margin-top:10px;}
+  .tc-bar{flex:1; height:5px; border-radius:99px; background:var(--paper); border:1px solid var(--line); overflow:hidden;}
   .tc-bar-fill{height:100%; background:var(--gm); border-radius:99px; transition:width .25s ease;}
+  .tc-pct{font-size:11px; font-weight:700; color:var(--ink-soft); flex-shrink:0; width:34px; text-align:right;}
   .tc-meta{display:flex; justify-content:space-between; font-size:10.5px; color:var(--ink-faint); margin-top:7px; flex-wrap:wrap; gap:6px;}
 
   .tc-steps{margin-top:14px; padding-top:14px; border-top:1px dashed var(--line); display:flex; flex-direction:column; gap:10px;}
@@ -506,9 +524,15 @@
   }
   .tc-step-done .tc-step-icon{background:var(--risk-low); border-color:var(--risk-low); color:#fff;}
   .tc-step-pending .tc-step-icon{background:var(--paper);}
+  .tc-step-awaiting_approval .tc-step-icon{background:var(--violet); border-color:var(--violet); color:#fff;}
+  .tc-step-rejected .tc-step-icon{background:var(--risk-high); border-color:var(--risk-high); color:#fff;}
+  .tc-step-awaiting_approval{background:rgba(37,99,235,.06); border-radius:9px; padding:8px 9px; margin:-8px -9px;}
   .tc-step-body{flex:1; min-width:0;}
-  .tc-step-title{font-size:12.5px; font-weight:600; color:var(--ink);}
+  .tc-step-title{font-size:12.5px; font-weight:600; color:var(--ink); display:flex; align-items:center; gap:6px; flex-wrap:wrap;}
+  .tc-step-dept-status{display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:500; color:var(--ink-faint);}
   .tc-step-desc{font-size:12px; color:var(--ink-soft); margin-top:2px; line-height:1.6;}
+  .tc-step-note{font-size:11.5px; color:var(--violet); margin-top:5px; font-weight:600;}
+  .tc-step-note.is-rejected{color:var(--risk-high);}
   .tc-step-result{
     font-size:12px; color:var(--ink-soft); margin-top:5px; padding:8px 10px; line-height:1.6;
     background:var(--paper); border:1px solid var(--line); border-radius:9px;
@@ -526,6 +550,7 @@
   .tc-actions button:disabled{opacity:.5; cursor:not-allowed;}
   .tc-actions .tc-action-status{font-size:11.5px; color:var(--ink-faint); align-self:center;}
   .tc-actions .tc-action-status.is-error{color:var(--risk-high);}
+  .tc-actions .tc-action-hint{font-size:11.5px; color:var(--violet); align-self:center; font-weight:600;}
 
   /* ---------- V33: 成本中心（月度財報員／API 成本會計） ---------- */
   .cost-center{padding:24px 0 8px;}
@@ -734,6 +759,17 @@
     display:none; text-align:center; padding:30px 10px; color:var(--ink-faint); font-size:13px;
   }
   .approval-empty.show{display:block;}
+
+  /* V34：有真實待審批項目時，藏起 3 張示範卡片；動態產生的真實卡片複用同一套
+     .approval-card 樣式，外觀完全一致，只是資料來源不同 */
+  .approval-card-demo.is-hidden-by-real{display:none;}
+  .approval-sync-status{margin-top:8px; font-size:11px; color:var(--ink-faint);}
+  .approval-sync-status.is-error{color:var(--risk-high);}
+  .approval-card .approval-tag.is-task-linked{color:var(--violet);}
+  .approval-ask-history{
+    font-size:11.5px; color:var(--ink-faint); margin-top:8px; padding:7px 10px;
+    background:var(--paper); border:1px solid var(--line); border-radius:8px;
+  }
 
   /* ---------- V20: 待審批歷史批示紀錄（接上 Cloudflare KV 後端）---------- */
   .approval-history{margin-top:26px; padding-top:20px; border-top:1px dashed var(--line-strong);}

@@ -29,5 +29,5 @@ const APP_CONFIG = {
   // 留空字串 "" 的話：如果 Worker 那邊也沒設定 ADMIN_KEY，維持 V37 以前
   // 「不驗證」的行為；如果 Worker 那邊有設定但這裡沒填，所有寫入動作都會
   // 收到「身分驗證失敗」的錯誤。
-  ADMIN_KEY: '',
+  ADMIN_KEY: 'ELVIS_2026_ADMIN_f93kP8qLm72xN4zBvQ91AeHyR6',
 };

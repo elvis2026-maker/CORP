@@ -198,6 +198,25 @@ function apiBase() {
   return raw.replace(/\/+$/, '');
 }
 
+// V38：所有「寫入」動作（核准／退回、任務推進、成本上限、上傳交付檔案、
+// 新任角色）都要帶上這個標頭。如果 config.js 的 ADMIN_KEY 是空字串，就不會
+// 帶任何標頭——這時候 Worker 那邊如果有設定 ADMIN_KEY，會回 401，畫面上會用
+// 清楚的中文訊息提醒您去 config.js 補上；Worker 沒設定 ADMIN_KEY 的話則維持
+// V37 以前「不驗證」的行為，方便還在測試階段的人。
+function adminHeaders() {
+  const key = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.ADMIN_KEY) ? APP_CONFIG.ADMIN_KEY.trim() : '';
+  return key ? { 'X-Elvis-Admin-Key': key } : {};
+}
+
+// 寫入類的 fetch 都可以共用這個小工具：401 時給出好懂的錯誤訊息，而不是
+// 讓呼叫端自己各寫一次同樣的判斷。
+function friendlyAuthError(res, data) {
+  if (res.status === 401) {
+    return (data && data.error) || '身分驗證失敗，請確認 config.js 的 ADMIN_KEY 是否正確';
+  }
+  return (data && data.error) || `HTTP ${res.status}`;
+}
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -510,12 +529,12 @@ form.addEventListener('submit', (e) => {
 });
 
 // ---------------- 招聘提案核准後，即時把新角色加入組織架構 ----------------
-// 示範「總經理提案 → 董事長核准 → 系統自動生效」這條路徑在前端怎麼運作：
-// 這裡只更新瀏覽器記憶體中的 ORG_REGISTRY 並重新渲染畫面，重新整理頁面
-// 就會還原成 org-data.js 原本的內容——要讓新角色「永久」生效，仍需要
-// 後端把這筆資料實際寫回 org-data.js（或資料庫），這部分還沒有後端可以做，
-// 詳見 README 待辦清單。
-function hireIntoOrg(deptId, role) {
+// V38 之前：這裡只更新瀏覽器記憶體中的 ORG_REGISTRY 並重新渲染畫面，重新整理
+// 頁面就會還原成 org-data.js 原本的內容。V38 補上了後端持久化（見下方
+// persistHire／loadOrgHires），這個函式本身維持只管「畫面」，多了
+// opts.skipFlash：從後端還原資料時不需要再跑一次捲動／高亮動畫。
+function hireIntoOrg(deptId, role, opts) {
+  opts = opts || {};
   const dept = ORG_REGISTRY.find(r => r.id === deptId);
   if (!dept) return;
   dept.roles.push(role);
@@ -529,6 +548,8 @@ function hireIntoOrg(deptId, role) {
     orgGrid.classList.add('in-view');
   }
 
+  if (opts.skipFlash) return;
+
   const target = document.getElementById('org-' + deptId);
   if (!target) return;
   document.querySelectorAll('details.dept').forEach(o => { if (o !== target) o.open = false; });
@@ -539,6 +560,44 @@ function hireIntoOrg(deptId, role) {
     setTimeout(() => target.classList.remove('bc-flash'), 1600);
   }, 350);
 }
+
+// V38：核准當下把新角色真的寫回後端（沿用同一個 APPROVALS_KV），這是先前
+// 版本一直留著的缺口——「畫面上看起來變了，重新整理就恢復原狀」。
+async function persistHire(deptId, role) {
+  const base = apiBase();
+  if (!base) return { ok: false, reason: 'no-endpoint' };
+  try {
+    const res = await fetch(`${base}/org-hire`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({ deptId, roleName: role.name, roleNick: role.nick, roleNameEn: role.nameEn, roleFn: role.fn }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) return { ok: false, reason: 'failed', error: friendlyAuthError(res, data) };
+    return { ok: true };
+  } catch (err) {
+    console.error('寫入新任角色失敗：', err);
+    return { ok: false, reason: 'failed', error: String(err) };
+  }
+}
+
+// 頁面載入時，把後端真的保存過的新角色（上一次核准留下的）補進 ORG_REGISTRY
+// 並重新渲染，讓招聘案核准的結果重新整理頁面後依然看得到。
+async function loadOrgHires() {
+  const base = apiBase();
+  if (!base) return;
+  try {
+    const res = await fetch(`${base}/org-state`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.hires || data.hires.length === 0) return;
+    data.hires.forEach(h => {
+      hireIntoOrg(h.deptId, { name: h.roleName, nick: h.roleNick, nameEn: h.roleNameEn, fn: h.roleFn }, { skipFlash: true });
+    });
+  } catch (err) {
+    console.error('讀取新任角色清單失敗：', err);
+  }
+}
+loadOrgHires();
 
 
 const pendingCountEl = document.getElementById('pendingCount');
@@ -587,7 +646,7 @@ async function submitApprovalDecision(cardId, caseTitle, action, resultNote) {
   try {
     const res = await fetch(`${base}/approval-action`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
       body: JSON.stringify({ id: cardId, caseTitle, action, note: resultNote || '' }),
     });
     const data = await res.json().catch(() => ({}));
@@ -642,7 +701,7 @@ async function submitApprovalItemDecision(id, action, note) {
   try {
     const res = await fetch(`${base}/approval-decide`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
       body: JSON.stringify({ id, action, note: note || '' }),
     });
     const data = await res.json().catch(() => ({}));
@@ -1059,7 +1118,7 @@ if (deliveryUploadForm) {
       };
       const res = await fetch(`${base}/delivery-upload`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...adminHeaders() },
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
@@ -1272,7 +1331,7 @@ if (taskGridEl) {
     try {
       const res = await fetch(`${base}/${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...adminHeaders() },
         body: JSON.stringify({ taskId }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1436,16 +1495,18 @@ if (approvalListEl) {
     card.querySelectorAll('.approval-actions button').forEach(b => b.disabled = true);
 
     let resultText = '';
+    let hireRole = null;
     if (act === 'approve') {
       resultText = '董事長已核准，總經理將繼續往下執行';
       note.className = 'approval-resolved-note show ok';
       if (btn.dataset.target === 'ap-hire') {
-        hireIntoOrg('bc-eng', {
+        hireRole = {
           name: 'DevOps 工程師',
           nick: '· 小維',
           nameEn: 'DevOps Engineer',
           fn: '負責部署流程與系統維運，監控服務穩定性，是董事長核准後新增的試營運角色，一個月後由總經理回報成效。'
-        });
+        };
+        hireIntoOrg('bc-eng', hireRole);
         resultText = '董事長已核准，「DevOps 工程師（小維）」已加入工程部組織架構';
       }
     } else if (act === 'reject') {
@@ -1467,6 +1528,19 @@ if (approvalListEl) {
       note.textContent = prefix + resultText + '（尚未設定後端 Worker 網址，這筆決定只顯示在畫面上，不會保存）';
     } else {
       note.textContent = prefix + resultText + '（寫入後端失敗，這筆決定暫時只顯示在畫面上，請稍後重新整理頁面再試一次）';
+    }
+
+    // V38：招聘案核准後，另外把新角色真的寫回後端，讓組織架構的異動也能撐過
+    // 重新整理頁面，不只是待審批歷史紀錄而已。
+    if (hireRole) {
+      const hireOutcome = await persistHire('bc-eng', hireRole);
+      if (hireOutcome.ok) {
+        note.textContent += '・新角色已永久保存';
+      } else if (hireOutcome.reason === 'no-endpoint') {
+        note.textContent += '・新角色僅顯示在畫面上（尚未設定後端 Worker 網址）';
+      } else {
+        note.textContent += `・新角色保存失敗（${hireOutcome.error || '請稍後再試'}）`;
+      }
     }
 
     updatePendingCountFromDom();
@@ -1563,7 +1637,7 @@ if (costLimitForm) {
     try {
       const res = await fetch(`${base}/cost-set-limit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...adminHeaders() },
         body: JSON.stringify({ dailyLimitUSD, monthlyLimitUSD }),
       });
       const data = await res.json().catch(() => ({}));

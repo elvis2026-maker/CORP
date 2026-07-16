@@ -123,6 +123,14 @@
       </div>
       </div>
 
+      <!-- V42：部門即時狀態從獨立大區塊縮小成快速燈號列，移到下指令的正下方——
+           尺寸看齊最上方的快速跳轉列，標題字級跟任務中心一致，名稱用縮寫，
+           手機版會自動換行成 2-3 排，不會佔太多版面 -->
+      <div class="ws-block ws-block-lights" id="lightsBlock">
+        <p class="ws-block-title">部門即時狀態 <span class="ws-block-note"><a href="#board">查看完整部門看板 →</a></span></p>
+        <div class="lights-grid" id="lightsGrid"></div>
+      </div>
+
       <!-- V34：任務中心整區從頁面下方移到這裡——跟總經理下指令的正下方，
            下完指令就能立刻往下看到任務進度，不用再滑到頁面很下面才看得到 -->
       <div class="ws-block task-center" id="tasks">
@@ -139,6 +147,11 @@
         <p class="task-sync-status" id="taskSyncStatus">載入中…</p>
         <p class="task-empty" id="taskEmpty" hidden>目前沒有正式任務。當董事長交辦「幫我做／建立／規劃／設計／開發」某件預估需要跨部門或跨天才能完成的事情時，總經理會在這裡建立正式任務，一次性的小事仍會用子任務快速處理，不會出現在這裡。</p>
         <div class="task-grid" id="taskGrid"></div>
+        <div class="task-done-section" id="taskDoneSection" hidden>
+          <p class="task-done-title" id="taskDoneTitle">已完成／已取消任務</p>
+          <div class="task-done-list" id="taskDoneList"></div>
+          <button type="button" class="task-done-toggle" id="taskDoneToggle" hidden>展開全部 ▼</button>
+        </div>
       </div>
 
       <div class="ws-block" id="approval">
@@ -283,16 +296,6 @@
       </div>
     </section>
 
-    <!-- ================= LIVE STATUS (部門即時狀態) ================= -->
-    <section class="live-status">
-      <div class="org-head">
-        <p class="eyebrow">Live Status · 各部門即時狀態</p>
-        <h2>部門即時狀態</h2>
-      </div>
-      <div class="lights-grid" id="lightsGrid"></div>
-        <a class="lights-more" href="#board">查看完整部門看板與討論紀錄 →</a>
-    </section>
-
 
     <section class="board" id="board">
       <div class="org-head">
@@ -411,7 +414,7 @@
 
   <footer class="site-footer">
     <div class="plate">Elvis 程式設計 <span>· 艾維斯資訊 IT 顧問</span></div>
-    <div class="meta"><span>V41.0</span><span>2026.07.16</span></div>
+    <div class="meta"><span>V42.0</span><span>2026.07.16</span></div>
   </footer>
 
   <!-- shared gradient definition -->

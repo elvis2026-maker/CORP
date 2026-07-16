@@ -19,6 +19,8 @@
 //   glyph       — 頭像裡顯示的單一文字（例如「總」「工」）
 //   name        — 部門看板使用的名稱
 //   lightsName  — 狀態燈號使用的名稱（多數與 name 相同，僅會議室顯示較短的「會議室」）
+//   lightsShort — V42 新增：狀態燈號縮小成快速燈號列後使用的兩字縮寫（例如「經理」「會議」），
+//                 讓燈號列在手機版也能一排排下來，不會被長名稱撐爆
 //   nameOrg     — 組織架構使用的完整部門名稱（例如「Agent 會議室」）
 //   nameEn      — 部門英文名稱
 //   nick        — 部門層級的暱稱標籤（例如「· 小總」），用於組織架構標題列與部門看板
@@ -47,6 +49,7 @@ const ORG_REGISTRY = [
     "glyph": "總",
     "name": "總經理室",
     "lightsName": "總經理室",
+    "lightsShort": "經理",
     "nameOrg": "總經理室",
     "nameEn": "Governance",
     "nick": "· 小總",
@@ -109,6 +112,7 @@ const ORG_REGISTRY = [
     "glyph": "議",
     "name": "Agent 會議室",
     "lightsName": "會議室",
+    "lightsShort": "會議",
     "nameOrg": "Agent 會議室",
     "nameEn": "Meeting Room",
     "nick": "· 小議",
@@ -177,6 +181,7 @@ const ORG_REGISTRY = [
     "glyph": "工",
     "name": "工程部",
     "lightsName": "工程部",
+    "lightsShort": "工程",
     "nameOrg": "工程部",
     "nameEn": "Engineering",
     "nick": "· 小工",
@@ -234,6 +239,7 @@ const ORG_REGISTRY = [
     "glyph": "品",
     "name": "產品開發部",
     "lightsName": "產品開發部",
+    "lightsShort": "產品",
     "nameOrg": "產品開發部",
     "nameEn": "Product",
     "nick": "· 小品",
@@ -297,6 +303,7 @@ const ORG_REGISTRY = [
     "glyph": "設",
     "name": "設計部",
     "lightsName": "設計部",
+    "lightsShort": "設計",
     "nameOrg": "設計部",
     "nameEn": "Design",
     "nick": "· 小設",
@@ -354,6 +361,7 @@ const ORG_REGISTRY = [
     "glyph": "計",
     "name": "會計部",
     "lightsName": "會計部",
+    "lightsShort": "會計",
     "nameOrg": "會計部",
     "nameEn": "Accounting",
     "nick": "· 小計",
@@ -411,6 +419,7 @@ const ORG_REGISTRY = [
     "glyph": "銷",
     "name": "成長行銷部",
     "lightsName": "成長行銷部",
+    "lightsShort": "行銷",
     "nameOrg": "成長行銷部",
     "nameEn": "Growth Marketing",
     "nick": "· 小銷",
@@ -484,6 +493,7 @@ const ORG_REGISTRY = [
     "glyph": "業",
     "name": "業務部",
     "lightsName": "業務部",
+    "lightsShort": "業務",
     "nameOrg": "業務部",
     "nameEn": "Sales &amp; Legal",
     "nick": "· 小業",
@@ -577,6 +587,7 @@ const ORG_REGISTRY = [
     "glyph": "策",
     "name": "策略發展部",
     "lightsName": "策略發展部",
+    "lightsShort": "策略",
     "nameOrg": "策略發展部",
     "nameEn": "Strategy &amp; Development",
     "nick": "· 小策",
@@ -641,6 +652,7 @@ const ORG_REGISTRY = [
     "glyph": "質",
     "name": "品質保證部",
     "lightsName": "品質保證部",
+    "lightsShort": "品質",
     "nameOrg": "品質保證部",
     "nameEn": "Quality Assurance",
     "nick": "· 小質",

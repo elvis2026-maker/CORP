@@ -13,11 +13,16 @@
 // ORG_REGISTRY 資料 render 出來，不再各自寫死 HTML。
 // 修改任何部門/角色的顯示內容，改 org-data.js 就會三處同時生效。
 
+// V42：部門即時狀態從一整個大區塊（含大標題＋雙欄卡片）縮小成快速燈號列——
+// 原本的版面沒什麼互動功能（只是狀態顯示），卻佔了不少版面，董事長回報這個
+// 位置更適合擺去下指令跟任務中心之間，尺寸看齊最上方的快速跳轉列。
+// 名稱改用 lightsShort 兩字縮寫，完整名稱與目前狀態放在 title 屬性（滑鼠停留
+// 或手機長按都看得到），點下去一樣連到 #board 對應部門的卡片。
 function renderLights(registry) {
   const container = document.getElementById('lightsGrid');
   if (!container) return;
   container.innerHTML = registry.map(r => `
-    <a class="light-chip" href="#${r.id}" data-dept-target="${r.id}"><span class="ava ${r.avaClass} ava-sm" aria-hidden="true"><span class="ava-glyph">${r.glyph}</span><span class="ava-dot ${r.lights.dot}"></span></span><span class="light-info"><span class="light-name">${r.lightsName}</span><span class="light-state">${r.lights.state}</span></span></a>`).join('');
+    <a class="light-pill" href="#${r.id}" data-dept-target="${r.id}" title="${escapeBoardText(r.lightsName)}｜${escapeBoardText(r.lights.state)}"><span class="stat-dot ${r.lights.dot}"></span><span class="light-pill-label">${escapeBoardText(r.lightsShort || r.lightsName)}</span></a>`).join('');
 }
 
 function renderBoard(registry) {
@@ -1373,23 +1378,81 @@ function buildTaskCardHtml(task) {
 }
 // V35：見下方 renderTasks() 尾端與 pollTaskStateIfActive() 的說明。
 let taskPollingShouldRun = false;
+// V42：已完成／已取消的任務不再無限往下堆全尺寸卡片——參考待審批區塊
+// 「最近 3 筆歷史批示淡化預覽」的做法，預設只顯示最近 3 筆的精簡摘要（淡化
+// 呈現，不能展開看步驟細節，純粹是「這件事辦完了」的紀錄），超過的部分收在
+// 「展開全部」後面、限制最大高度、內部捲動，不會讓任務中心越長越長。
+function buildTaskFadedItemHtml(task) {
+  const meta = TASK_STATUS_META[task.status] || { dot: 's-idle', label: task.status };
+  const doneCount = task.steps.filter(s => s.status === 'done').length;
+  const total = task.steps.length || 1;
+  return `
+      <div class="task-done-item" data-status="${task.status}">
+        <span class="stat-dot ${meta.dot}"></span>
+        <span class="task-done-id">${escapeBoardText(task.id)}</span>
+        <span class="task-done-item-title">${escapeBoardText(task.title)}</span>
+        <span class="task-done-meta">${doneCount}/${total}・${meta.label}・${formatTaskTime(task.updatedAt || task.createdAt)}</span>
+      </div>`;
+}
+const TASK_DONE_COLLAPSE_COUNT = 3;
+let taskDoneExpanded = false;
+let lastLoadedTasks = []; // V42：展開/收合「已完成任務」時直接用這份重新渲染，不用重打一次後端
+
 function renderTasks(tasks) {
+  lastLoadedTasks = tasks;
   const grid = document.getElementById('taskGrid');
   const empty = document.getElementById('taskEmpty');
   const summaryBar = document.getElementById('taskSummaryBar');
+  const doneSection = document.getElementById('taskDoneSection');
+  const doneList = document.getElementById('taskDoneList');
+  const doneToggle = document.getElementById('taskDoneToggle');
+  const doneTitle = document.getElementById('taskDoneTitle');
   if (!grid) return;
   if (!tasks.length) {
     grid.innerHTML = '';
     if (empty) empty.hidden = false;
     if (summaryBar) summaryBar.hidden = true;
+    if (doneSection) doneSection.hidden = true;
     return;
   }
   if (empty) empty.hidden = true;
-  grid.innerHTML = tasks.map(buildTaskCardHtml).join('\n');
+
+  // V42：進行中／等裁示／規劃中／卡關的任務照舊用完整卡片顯示；已完成／已取消
+  // 的任務移到下面的淡化摘要區，不再無限往下堆——這是董事長回報「任務中心越來
+  // 越長」查到的根本原因（V32 建立這個畫面時完全沒有處理任務完成後的顯示方式，
+  // 完成的任務會永遠留在畫面上，跟活躍任務長得一模一樣、佔一樣大的版面）。
+  const activeTasks = tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');
+  const terminalTasks = tasks.filter(t => t.status === 'done' || t.status === 'cancelled')
+    .slice()
+    .sort((a, b) => ((a.updatedAt || a.createdAt) < (b.updatedAt || b.createdAt) ? 1 : -1));
+
+  grid.innerHTML = activeTasks.length
+    ? activeTasks.map(buildTaskCardHtml).join('\n')
+    : '<p class="task-all-done-note">目前沒有進行中的任務，已完成／已取消的任務收在下方。</p>';
+
+  if (doneSection) {
+    if (!terminalTasks.length) {
+      doneSection.hidden = true;
+    } else {
+      doneSection.hidden = false;
+      const visible = taskDoneExpanded ? terminalTasks : terminalTasks.slice(0, TASK_DONE_COLLAPSE_COUNT);
+      doneList.innerHTML = visible.map(buildTaskFadedItemHtml).join('');
+      doneList.classList.toggle('is-expanded', taskDoneExpanded);
+      if (doneTitle) doneTitle.textContent = `已完成／已取消任務（共 ${terminalTasks.length} 筆）`;
+      if (doneToggle) {
+        if (terminalTasks.length > TASK_DONE_COLLAPSE_COUNT) {
+          doneToggle.hidden = false;
+          doneToggle.textContent = taskDoneExpanded ? '收合 ▲' : `展開全部 ▼（還有 ${terminalTasks.length - TASK_DONE_COLLAPSE_COUNT} 筆）`;
+        } else {
+          doneToggle.hidden = true;
+        }
+      }
+    }
+  }
+
   // V34：任務中心移到跟總經理下指令下方後，這裡加一行彙總數字，
   // 不用展開每張卡片也能一眼看到「現在還有幾件在動、平均做到幾%了」
   if (summaryBar) {
-    const activeTasks = tasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');
     const awaitingCount = tasks.filter(t => t.status === 'awaiting_approval').length;
     const avgPct = tasks.length
       ? Math.round(tasks.reduce((sum, t) => {
@@ -1406,6 +1469,13 @@ function renderTasks(tasks) {
   // 做完的，需要有東西定期重新讀一次才看得到進度真的往前走。這裡只記錄「現在
   // 是否有任務正在 planning／in_progress」，實際輪詢邏輯在下面 pollTaskStateIfActive()。
   taskPollingShouldRun = tasks.some(t => t.status === 'planning' || t.status === 'in_progress');
+}
+const taskDoneToggleEl = document.getElementById('taskDoneToggle');
+if (taskDoneToggleEl) {
+  taskDoneToggleEl.addEventListener('click', () => {
+    taskDoneExpanded = !taskDoneExpanded;
+    renderTasks(lastLoadedTasks);
+  });
 }
 async function loadTaskState() {
   const status = document.getElementById('taskSyncStatus');

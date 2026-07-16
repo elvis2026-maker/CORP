@@ -145,7 +145,7 @@
         <p class="ws-block-title">待您核准 <span class="ws-block-note">總經理彙整完畢後送到這裡，核准後才會繼續往下執行</span></p>
         <div class="approval-list" id="approvalList">
 
-        <div class="approval-card approval-card-demo" data-risk="mid" id="ap-quote">
+        <div class="approval-card approval-card-demo" data-risk="mid" id="ap-quote" hidden>
           <div class="approval-top">
             <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
             <div>
@@ -167,7 +167,7 @@
           <p class="approval-resolved-note"></p>
         </div>
 
-        <div class="approval-card approval-card-demo" data-risk="low" id="ap-color">
+        <div class="approval-card approval-card-demo" data-risk="low" id="ap-color" hidden>
           <div class="approval-top">
             <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
             <div>
@@ -189,7 +189,7 @@
           <p class="approval-resolved-note"></p>
         </div>
 
-        <div class="approval-card approval-card-demo" data-risk="mid" id="ap-hire">
+        <div class="approval-card approval-card-demo" data-risk="mid" id="ap-hire" hidden>
           <div class="approval-top">
             <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
             <div>
@@ -211,13 +211,18 @@
           <p class="approval-resolved-note"></p>
         </div>
 
-        <!-- V34：真正資料驅動的待審批項目（跟正式任務的裁示關卡串接）插在這裡；
-             一旦有真實項目，上面 3 張示範卡片（approval-card-demo）會被隱藏 -->
+        <!-- V34：真正資料驅動的待審批項目（跟正式任務的裁示關卡串接）插在這裡
+             V41：董事長要求「待審批是空的時候不要顯示假資料」，上面 3 張示範卡片
+             （approval-card-demo）現在永久帶 hidden 屬性、不會再顯示；沒有真實
+             待審批項目時，改顯示 #approvalEmpty 提示 + 最近 3 筆歷史批示的淡化預覽
+             （見下方 #approvalRecentFaded），示範卡片的 HTML 保留純粹是為了不動到
+             既有的 id／資料結構，之後如果要復原示範功能，把 hidden 屬性拿掉即可 -->
         <div id="approvalDynamicList"></div>
 
       </div>
       <p class="approval-sync-status" id="approvalSyncStatus"></p>
       <p class="approval-empty" id="approvalEmpty">目前沒有待您核准的事項，總經理會在有需要時把新的項目送到這裡。</p>
+      <div class="approval-recent-faded" id="approvalRecentFaded"></div>
 
       <div class="approval-history" id="approvalHistory">
         <p class="approval-history-title">📜 歷史批示紀錄 <span class="ws-block-note">核准／退回／加問動作會存進後端（Cloudflare KV），重新整理頁面也不會消失</span></p>
@@ -232,8 +237,9 @@
         <div class="delivery-list" id="deliveryGrid"></div>
         <p class="delivery-sync-status" id="deliverySyncStatus">載入中…</p>
 
-        <details class="delivery-upload-panel">
-          <summary>＋ 新增真實交付項目</summary>
+        <details class="delivery-upload-panel" id="deliveryUploadPanel">
+          <summary id="deliveryUploadSummary">＋ 新增真實交付項目</summary>
+          <p class="delivery-edit-banner" id="deliveryEditBanner" hidden>正在編輯：<span id="deliveryEditingTitle"></span> <button type="button" id="deliveryEditCancelBtn">取消編輯，改回新增</button></p>
           <form id="deliveryUploadForm" class="delivery-upload-form">
             <label class="delivery-field">
               <span>交付項目標題</span>
@@ -253,7 +259,7 @@
               <input type="url" id="deliveryDemoUrlInput" placeholder="例如：https://your-demo.example.com">
             </label>
             <label class="delivery-field">
-              <span>或上傳 Demo 檔案（例如一份 .html 網頁，選填）</span>
+              <span>或上傳 Demo 檔案（例如一份 .html 網頁，選填；編輯時若不選新檔案則維持原檔案）</span>
               <input type="file" id="deliveryDemoFileInput">
             </label>
             <p class="delivery-upload-subhead">下載檔案包（網址或檔案，擇一即可）</p>
@@ -262,14 +268,14 @@
               <input type="url" id="deliveryDownloadUrlInput" placeholder="例如：https://drive.google.com/...">
             </label>
             <label class="delivery-field">
-              <span>或上傳下載檔案包（例如一份 .zip，選填）</span>
+              <span>或上傳下載檔案包（例如一份 .zip，選填；編輯時若不選新檔案則維持原檔案）</span>
               <input type="file" id="deliveryDownloadFileInput">
             </label>
             <label class="delivery-check-field">
               <input type="checkbox" id="deliveryVerifiedInput">
               <span>這個項目已經過品質保證部（小質）驗收</span>
             </label>
-            <button type="submit">新增交付項目</button>
+            <button type="submit" id="deliveryUploadSubmitBtn">新增交付項目</button>
             <p class="delivery-upload-hint" id="deliveryUploadHint">載入中…</p>
             <p class="delivery-upload-status" id="deliveryUploadStatus"></p>
           </form>
@@ -405,7 +411,7 @@
 
   <footer class="site-footer">
     <div class="plate">Elvis 程式設計 <span>· 艾維斯資訊 IT 顧問</span></div>
-    <div class="meta"><span>V40.0</span><span>2026.07.16</span></div>
+    <div class="meta"><span>V41.0</span><span>2026.07.16</span></div>
   </footer>
 
   <!-- shared gradient definition -->

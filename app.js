@@ -106,6 +106,13 @@ function renderDelivery(items, orgRegistry) {
       ? `<a class="dlist-btn" href="${d.downloadUrl}" download target="_blank" rel="noopener noreferrer">下載</a>`
       : `<button type="button" class="dlist-btn is-disabled" disabled title="這個項目還沒有可下載的檔案，等實際完成後可以在下方表單填網址或上傳檔案">下載</button>`;
     const demoTag = d.isDemoItem ? '<i class="bc-demo-tag delivery-demo-tag">示範內容</i>' : '';
+    // V41：董事長要求「自己上傳的要能編輯或刪除」——示範內容（isDemoItem）本來
+    // 就不在後端 KV 裡，沒有 id 可以編輯／刪除，只有真實項目（dv-real- 開頭）
+    // 才顯示這兩顆按鈕。
+    const editActionsHtml = (!d.isDemoItem)
+      ? `<button type="button" class="dlist-btn dlist-btn-edit" data-delivery-edit="${d.id}">編輯</button>
+         <button type="button" class="dlist-btn dlist-btn-delete" data-delivery-delete="${d.id}">刪除</button>`
+      : '';
     return `
         <div class="dlist-row">
           <span class="dlist-icon ${dotClass}" aria-hidden="true">${rowIcon}</span>
@@ -118,7 +125,7 @@ function renderDelivery(items, orgRegistry) {
             ${deptTagsHtml}
             <span class="dlist-time">${d.time || ''}</span>
           </div>
-          <div class="dlist-actions">${demoBtn}${downloadBtn}</div>
+          <div class="dlist-actions">${demoBtn}${downloadBtn}${editActionsHtml}</div>
         </div>`;
   }).join('\n');
 }
@@ -604,22 +611,60 @@ const pendingCountEl = document.getElementById('pendingCount');
 const pendingCountNavEl = document.getElementById('pendingCountNav');
 const approvalEmpty = document.getElementById('approvalEmpty');
 
-// V34：待審批數字改成「即時從畫面上算」，不再用一個手動加減的變數維護——
-// 一旦有真實的待審批項目（#approvalDynamicList 裡面的卡片），示範卡片會被藏起來，
-// 這時候待辦數字只算真實項目；沒有真實項目時，才算示範卡片裡還沒處理的那幾張。
-// 這樣不管卡片是怎麼被解決的（示範卡片手動點擊、真實項目呼叫 /approval-decide、
-// 或是取消任務時連帶關閉待審批項目），數字永遠對得上畫面上實際看到的卡片數。
+// V20：待審批核准／退回／加問動作串接後端共用的常數，先宣告在這裡，因為下面
+// updatePendingCountFromDom() 在頁面載入當下就會呼叫一次、需要用到
+// approvalHistoryRecordsCache（V41 新增的淡化預覽功能）。
+const ACTION_LABEL = { approve: '✓ 核准', reject: '✕ 退回', ask: '… 加問' };
+// V21：歷史批示紀錄平時只顯示最近幾筆，避免清單越拉越長把公文夾撐得很高；
+// 累積比較多筆之後，點「展開全部」才會看到完整清單（後端最多回傳最新 100 筆，
+// 展開後的清單本身也有捲動高度上限，不會無止盡撐開整個頁面，見 styles.css
+// 的 .approval-history-list.is-expanded）。
+const APPROVAL_HISTORY_COLLAPSE_COUNT = 3; // V41：董事長要求改成只顯示 3 則，其餘收合（原本是 8）
+let approvalHistoryExpanded = false;
+let approvalHistoryRecordsCache = [];
+
+// V41：董事長要求「待審批是空的時候不要顯示假資料」——3 張示範卡片現在永久
+// hidden（見 index.html），待辦數字改成只算真實項目（#approvalDynamicList 裡
+// 的卡片），不用再分「有沒有真實項目」兩種算法。沒有真實待審批項目時，改顯示
+// 最近 3 筆歷史批示紀錄的淡化預覽（見 renderApprovalRecentFaded），讓董事長
+// 一眼看到「最近核准過什麼」而不是一張假的示範卡片。
 function updatePendingCountFromDom() {
-  const dynamicCount = document.querySelectorAll('#approvalDynamicList .approval-card').length;
-  const count = dynamicCount > 0
-    ? dynamicCount
-    : document.querySelectorAll('.approval-card-demo:not(.is-resolved)').length;
+  const count = document.querySelectorAll('#approvalDynamicList .approval-card').length;
   if (pendingCountEl) pendingCountEl.textContent = count;
   if (pendingCountNavEl) pendingCountNavEl.textContent = count;
   if (approvalEmpty) approvalEmpty.classList.toggle('show', count === 0);
+  renderApprovalRecentFaded(count === 0);
   return count;
 }
-updatePendingCountFromDom(); // 頁面載入時就同步一次
+function formatFadedApprovalTime(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
+}
+// 用「最近核准的內容（刷淡）」取代原本示範卡片的角色——只是唯讀的參考，沒有
+// 核准／退回按鈕，資料來源是 approvalHistoryRecordsCache（loadApprovalHistory()
+// 讀回來的真實紀錄），不是另外打一次 API。
+function renderApprovalRecentFaded(shouldShow) {
+  const container = document.getElementById('approvalRecentFaded');
+  if (!container) return;
+  if (!shouldShow || !approvalHistoryRecordsCache.length) {
+    container.innerHTML = '';
+    container.classList.remove('show');
+    return;
+  }
+  container.classList.add('show');
+  const recent = approvalHistoryRecordsCache.slice(0, 3);
+  container.innerHTML = `<p class="approval-recent-faded-title">最近核准紀錄（僅供參考，非待處理項目）</p>` + recent.map(r => {
+    const label = ACTION_LABEL[r.action] || r.action;
+    const cls = r.action === 'approve' ? 'act-approve' : (r.action === 'reject' ? 'act-reject' : 'act-ask');
+    return `
+      <div class="approval-recent-faded-item ${cls}">
+        <span class="approval-recent-faded-badge">${label}</span>
+        <span class="approval-recent-faded-case">${escapeBoardText(r.caseTitle || '')}</span>
+        <span class="approval-recent-faded-time">${formatFadedApprovalTime(r.decidedAt)}</span>
+      </div>`;
+  }).join('');
+}
+updatePendingCountFromDom(); // 頁面載入時就同步一次（這時候 approvalHistoryRecordsCache 還是空陣列，等 loadApprovalHistory() 讀回真實資料後會再呼叫一次更新）
 
 // ---------------- V20：待審批核准／退回／加問動作串接後端（Cloudflare KV）----------------
 // 跟總經理對話共用同一支 Worker，多開兩個路徑：
@@ -628,15 +673,6 @@ updatePendingCountFromDom(); // 頁面載入時就同步一次
 // 如果 config.js 沒填 Worker 網址，或這次呼叫失敗（例如 Worker 還沒綁 KV），
 // 畫面上的核准／退回互動仍然完整可用，只是會誠實註明「這筆決定沒有成功存進後端」，
 // 不會讓您誤以為已經永久保存。
-const ACTION_LABEL = { approve: '✓ 核准', reject: '✕ 退回', ask: '… 加問' };
-
-// V21：歷史批示紀錄平時只顯示最近幾筆，避免清單越拉越長把公文夾撐得很高；
-// 累積比較多筆之後，點「展開全部」才會看到完整清單（後端最多回傳最新 100 筆，
-// 展開後的清單本身也有捲動高度上限，不會無止盡撐開整個頁面，見 styles.css
-// 的 .approval-history-list.is-expanded）。
-const APPROVAL_HISTORY_COLLAPSE_COUNT = 8;
-let approvalHistoryExpanded = false;
-let approvalHistoryRecordsCache = [];
 
 async function submitApprovalDecision(cardId, caseTitle, action, resultNote) {
   const base = apiBase();
@@ -723,15 +759,13 @@ async function loadApprovalList() {
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     const items = Array.isArray(data.items) ? data.items : [];
     dynamicList.innerHTML = items.map(buildApprovalItemCardHtml).join('\n');
-    // 有真實項目時，把 3 張示範卡片藏起來；沒有真實項目時，示範卡片照常顯示
-    // （示範內容的作用是讓網站在還沒有真實資料時，也能示範這個功能長什麼樣子）
-    document.querySelectorAll('.approval-card-demo').forEach(card => {
-      card.classList.toggle('is-hidden-by-real', items.length > 0);
-    });
+    // V41：3 張示範卡片現在永久 hidden（見 index.html），不需要再依真實項目
+    // 數量切換顯示／隱藏；沒有真實項目時，updatePendingCountFromDom() 會顯示
+    // #approvalEmpty 提示 + 最近核准紀錄的淡化預覽（見 renderApprovalRecentFaded）。
     if (status) {
       status.textContent = items.length > 0
-        ? `已連上任務系統的真實待審批項目（${items.length} 筆），以上示範卡片已隱藏。`
-        : (data.error || '');
+        ? `已連上任務系統的真實待審批項目（${items.length} 筆）。`
+        : (data.error || '目前沒有真實待審批項目。');
       status.classList.toggle('is-error', !!data.error && items.length === 0);
     }
     updatePendingCountFromDom();
@@ -742,6 +776,10 @@ async function loadApprovalList() {
 
 function renderApprovalHistory(records) {
   approvalHistoryRecordsCache = records;
+  // V41：歷史紀錄一有新資料就重新算一次「要不要顯示最近核准的淡化預覽」——
+  // 這裡不知道目前待審批數字是多少，直接重用 updatePendingCountFromDom() 現成
+  // 的判斷邏輯（它會自己讀 DOM 上真實項目的數量），不用另外維護一份判斷條件。
+  updatePendingCountFromDom();
   const list = document.getElementById('approvalHistoryList');
   const status = document.getElementById('approvalHistoryStatus');
   const toggleBtn = document.getElementById('approvalHistoryToggle');
@@ -989,6 +1027,11 @@ function formatDeliveryTime(iso) {
   if (!iso) return '';
   try { return new Date(iso).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
 }
+// V41：編輯表單需要「這筆真實項目原本的完整資料」（標題、說明、參與部門、
+// 網址、是否已驗收…）才能預填，但 renderDelivery() 用的是簡化過的顯示用物件
+// （demoUrl 可能是組出來的 R2 代理網址）。這裡另外存一份「後端原始回傳資料」
+// 的對照表，用 id 查，點擊編輯時就不用再多打一次 API。
+let deliveryRealRecordsCache = {};
 async function loadDeliveryState() {
   const status = document.getElementById('deliverySyncStatus');
   const base = apiBase();
@@ -1030,6 +1073,10 @@ async function loadDeliveryState() {
       downloadUrl: it.downloadUrl || (it.hasDownload ? `${base}/delivery-file?id=${encodeURIComponent(it.id)}&kind=download` : ''),
       isDemoItem: false,
     }));
+    // V41：存一份原始資料（含 hasDemo／hasDownload／真正的 demoUrl 欄位，不是
+    // 組出來的代理網址），編輯表單需要分清楚「這個欄位原本是網址還是上傳的檔案」
+    deliveryRealRecordsCache = {};
+    (data.items || []).forEach(it => { deliveryRealRecordsCache[it.id] = it; });
     // V34：只要有任何一筆真實交付項目，就把 delivery-data.js 的示範卡片整個
     // 藏起來，不再兩者並列——呼應「所有寫死假資料的部分，只要有真實資料就隱藏」。
     renderDelivery(realItems.length > 0 ? realItems : demoItems, ORG_REGISTRY);
@@ -1073,6 +1120,87 @@ function fileToBase64(file) {
 }
 
 const deliveryUploadForm = document.getElementById('deliveryUploadForm');
+// V41：新增／編輯共用同一個表單——editingDeliveryId 是 null 代表現在是「新增」模式，
+// 有值代表正在編輯這一筆真實項目的 id。點擊某筆項目的「編輯」按鈕時，把這個表單
+// 打開並用 deliveryRealRecordsCache 裡的原始資料預填進去；送出時依這個狀態決定
+// 呼叫 /delivery-upload 還是 /delivery-edit。
+let editingDeliveryId = null;
+
+function enterDeliveryEditMode(id) {
+  const record = deliveryRealRecordsCache[id];
+  if (!record) return;
+  editingDeliveryId = id;
+  const panel = document.getElementById('deliveryUploadPanel');
+  const summary = document.getElementById('deliveryUploadSummary');
+  const banner = document.getElementById('deliveryEditBanner');
+  const titleSpan = document.getElementById('deliveryEditingTitle');
+  const submitBtn = document.getElementById('deliveryUploadSubmitBtn');
+  if (panel) panel.open = true;
+  if (summary) summary.textContent = '編輯交付項目';
+  if (banner) banner.hidden = false;
+  if (titleSpan) titleSpan.textContent = record.title;
+  if (submitBtn) submitBtn.textContent = '儲存變更';
+
+  document.getElementById('deliveryTitleInput').value = record.title || '';
+  document.getElementById('deliveryDescInput').value = record.desc || '';
+  document.getElementById('deliveryDemoUrlInput').value = record.demoUrl || '';
+  document.getElementById('deliveryDownloadUrlInput').value = record.downloadUrl || '';
+  document.getElementById('deliveryVerifiedInput').checked = record.badge === 'verified';
+  document.getElementById('deliveryDemoFileInput').value = '';
+  document.getElementById('deliveryDownloadFileInput').value = '';
+  deliveryUploadForm.querySelectorAll('input[name="deliveryContributor"]').forEach(el => {
+    el.checked = (record.contributors || []).includes(el.value);
+  });
+  panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function exitDeliveryEditMode() {
+  editingDeliveryId = null;
+  const summary = document.getElementById('deliveryUploadSummary');
+  const banner = document.getElementById('deliveryEditBanner');
+  const submitBtn = document.getElementById('deliveryUploadSubmitBtn');
+  if (summary) summary.textContent = '＋ 新增真實交付項目';
+  if (banner) banner.hidden = true;
+  if (submitBtn) submitBtn.textContent = '新增交付項目';
+  deliveryUploadForm.reset();
+}
+
+document.getElementById('deliveryEditCancelBtn')?.addEventListener('click', exitDeliveryEditMode);
+
+document.getElementById('deliveryGrid')?.addEventListener('click', async (e) => {
+  const editBtn = e.target.closest('[data-delivery-edit]');
+  const deleteBtn = e.target.closest('[data-delivery-delete]');
+  if (editBtn) {
+    enterDeliveryEditMode(editBtn.dataset.deliveryEdit);
+    return;
+  }
+  if (deleteBtn) {
+    const id = deleteBtn.dataset.deliveryDelete;
+    const record = deliveryRealRecordsCache[id];
+    const title = record ? record.title : '這筆交付項目';
+    if (!confirm(`確定要刪除「${title}」嗎？這個動作無法復原，已上傳的檔案也會一併從儲存空間刪除。`)) return;
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = '刪除中…';
+    const base = apiBase();
+    try {
+      const res = await fetch(`${base}/delivery-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (editingDeliveryId === id) exitDeliveryEditMode(); // 剛好在編輯這筆時被刪掉，退回新增模式
+      await loadDeliveryState();
+    } catch (err) {
+      console.error('刪除交付項目失敗：', err);
+      alert(`刪除失敗：${err.message || err}`);
+      deleteBtn.disabled = false;
+      deleteBtn.textContent = '刪除';
+    }
+  }
+});
+
 if (deliveryUploadForm) {
   deliveryUploadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1096,7 +1224,9 @@ if (deliveryUploadForm) {
     const downloadFile = downloadFileEl.files[0] || null;
     const demoUrl = demoUrlEl.value.trim();
     const downloadUrl = downloadUrlEl.value.trim();
-    if (!demoFile && !downloadFile && !demoUrl && !downloadUrl) {
+    // V41：編輯模式時，「這次沒填網址、也沒選新檔案」代表沿用原本的內容，不能
+    // 當成「兩者都沒有」擋下來；新增模式才需要強制至少擇一
+    if (!editingDeliveryId && !demoFile && !downloadFile && !demoUrl && !downloadUrl) {
       if (statusEl) { statusEl.textContent = 'Demo（網址或檔案）跟下載檔案包（網址或檔案），至少要填一個。'; statusEl.classList.add('is-error'); }
       return;
     }
@@ -1116,19 +1246,26 @@ if (deliveryUploadForm) {
         demoFile: demoFile ? { name: demoFile.name, mimeType: demoFile.type || 'text/html', data: await fileToBase64(demoFile) } : null,
         downloadFile: downloadFile ? { name: downloadFile.name, mimeType: downloadFile.type || 'application/octet-stream', data: await fileToBase64(downloadFile) } : null,
       };
-      const res = await fetch(`${base}/delivery-upload`, {
+      const isEditing = !!editingDeliveryId;
+      if (isEditing) payload.id = editingDeliveryId;
+      const res = await fetch(`${base}/${isEditing ? 'delivery-edit' : 'delivery-upload'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...adminHeaders() },
         body: JSON.stringify(payload),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
-      deliveryUploadForm.reset();
-      if (statusEl) { statusEl.textContent = '✓ 已新增，出現在上方交付中心清單裡了。'; statusEl.classList.remove('is-error'); }
+      if (isEditing) {
+        exitDeliveryEditMode();
+        if (statusEl) { statusEl.textContent = '✓ 已儲存變更。'; statusEl.classList.remove('is-error'); }
+      } else {
+        deliveryUploadForm.reset();
+        if (statusEl) { statusEl.textContent = '✓ 已新增，出現在上方交付中心清單裡了。'; statusEl.classList.remove('is-error'); }
+      }
       await loadDeliveryState();
     } catch (err) {
-      console.error('交付項目新增失敗：', err);
-      if (statusEl) { statusEl.textContent = `新增失敗：${err.message || err}`; statusEl.classList.add('is-error'); }
+      console.error(`交付項目${editingDeliveryId ? '編輯' : '新增'}失敗：`, err);
+      if (statusEl) { statusEl.textContent = `${editingDeliveryId ? '編輯' : '新增'}失敗：${err.message || err}`; statusEl.classList.add('is-error'); }
     } finally {
       if (submitBtn) submitBtn.disabled = false;
     }
@@ -1365,8 +1502,21 @@ loadTaskState();
 // 這裡用一個很輕量的輪詢：每 6 秒檢查一次，只有「目前確實有任務在 planning／
 // in_progress」時才會真的重新呼叫 /task-list（不會平白無故一直打 API），
 // 任務都做完、卡在等董事長裁示、或取消之後，輪詢會自動停止打擾。
+//
+// V41：董事長回報「進到任務後有看到要核准的地方，但『待我核准』、『各部門上班
+// 狀況』沒有即時更新」——查證後確認：這兩塊原本完全沒有被排進任何輪詢，只有
+// 頁面第一次載入、或使用者自己觸發某個按鈕（核准／推進下一步…）時才會重新讀取。
+// 但背景自動執行（V35）產生新的待審批項目、或完成某個步驟更新部門看板，都是
+// 在背景默默發生的，不屬於任何一種前端使用者互動，兩邊都撈不到最新狀態。
+// 修法：背景執行還在跑（taskPollingShouldRun 為 true）的同一個輪詢時機，
+// 一併重新讀取待審批清單跟部門看板——這兩支都只是輕量的 KV 讀取（不會呼叫
+// Gemini，不會增加 API 成本），任務都做完或卡在等裁示之後，輪詢自然一起停止。
 setInterval(() => {
-  if (taskPollingShouldRun) loadTaskState();
+  if (taskPollingShouldRun) {
+    loadTaskState();
+    loadApprovalList();
+    loadBoardState();
+  }
 }, 6000);
 
 // ---------------- V25：讀取真實對話紀錄，取代重新整理後又變回展示訊息的問題 ----------------

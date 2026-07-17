@@ -1600,9 +1600,10 @@ setInterval(() => {
 // 重新整理頁面後就消失了」，查證後確認這是 V25 就存在、沒寫進待辦清單的缺口
 // （見 cloudflare-worker.js persistChatTurn 的說明），這一版把它補上。
 //
-// 範圍老實說清楚：這裡只還原「文字對話」與風險標示、以及委派子任務的執行結果卡片，
-// 不會還原之前對話裡附過的圖片／影片縮圖——附件的實際檔案內容從來沒有被送到任何
-// 後端保存過，這是仍然存在的已知限制，不是這次沒做好。
+// V44 更新：對話附件（圖片／影片／檔案）現在會真的持久化保存（DO SQLite
+// 或 KV 索引存中繼資料＋Cloudflare R2 存檔案本體），這裡也一併還原附件
+// 縮圖／檔案卡片，不再只有文字對話——原本這段註解說的「不會還原附件」
+// 已經是 V44 之前的舊限制，見上方 README「V44」版次紀錄。
 function buildGmHistoryMessageHtml(text, risk, subtask, taskRef) {
   const riskBadge = risk
     ? `<span class="risk risk-${risk.level}" title="${String(risk.reason || '').replace(/"/g,'&quot;')}">${RISK_LABEL[risk.level] || '風險'}</span> `
@@ -1622,13 +1623,37 @@ function buildGmHistoryMessageHtml(text, risk, subtask, taskRef) {
         </div>
       </div>${subtaskHtml}${taskHtml}`;
 }
-function buildUserHistoryMessageHtml(text) {
+// V44：對話附件現在真的持久化了（DO SQLite/KV 存中繼資料＋R2 存檔案本體，
+// 見 cloudflare-worker.js persistChatAttachments），重新整理頁面後可以正確
+// 還原之前附過的圖片／影片縮圖與檔案卡片，不再只剩文字——這是 V25 以來
+// 一直存在、README 寫得很清楚的已知限制，這一版補上。
+function buildAttachmentMediaHtml(att) {
+  const base = apiBase();
+  if (!base || !att || !att.id) return '';
+  const url = `${base}/chat-attachment-file?id=${encodeURIComponent(att.id)}`;
+  const mime = att.mimeType || '';
+  if (mime.startsWith('image/')) return `<img class="msg-media" src="${url}" alt="董事長附加圖片：${escapeBoardText(att.name || '')}">`;
+  if (mime.startsWith('video/')) return `<video class="msg-media" src="${url}" controls></video>`;
+  return `
+    <div class="file-chip">
+      <span class="file-chip-icon">${fileIconSvg()}</span>
+      <span class="file-chip-info">
+        <span class="file-chip-name">${escapeBoardText(att.name || '未命名檔案')}</span>
+        <span class="file-chip-size">${fmtSize(att.sizeBytes || 0)}</span>
+      </span>
+    </div>`;
+}
+function buildUserHistoryMessageHtml(text, attachments) {
+  const mediaHtml = (attachments || []).map(buildAttachmentMediaHtml).join('');
   return `
       <div class="msg msg-user">
         <span class="ava ava-chairman ava-sm" aria-hidden="true"><span class="ava-glyph">劉</span></span>
         <div class="msg-body">
           <span class="msg-role">董事長</span>
-          <p>${escapeBoardText(text)}</p>
+          <div class="msg-media-wrap">
+            ${text ? `<p>${escapeBoardText(text)}</p>` : ''}
+            ${mediaHtml}
+          </div>
         </div>
       </div>`;
 }
@@ -1641,7 +1666,7 @@ async function loadChatHistory() {
     if (!res.ok || data.error || !Array.isArray(data.messages) || data.messages.length === 0) return; // 沒有真實紀錄：維持展示對話
     document.querySelectorAll('#consoleLog .msg, #consoleLog .subtask-card, #consoleLog .task-created-notice').forEach(el => el.remove()); // 晨報卡片（.briefing-card）保留，只清掉對話訊息與委派結果／任務提示卡片
     const html = data.messages.map(m => (
-      m.role === 'model' ? buildGmHistoryMessageHtml(m.text, m.risk, m.subtask, m.task) : buildUserHistoryMessageHtml(m.text)
+      m.role === 'model' ? buildGmHistoryMessageHtml(m.text, m.risk, m.subtask, m.task) : buildUserHistoryMessageHtml(m.text, m.attachments)
     )).join('');
     log.insertAdjacentHTML('beforeend', html);
     log.scrollTop = log.scrollHeight;

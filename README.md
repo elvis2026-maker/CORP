@@ -1,8 +1,25 @@
-# ELVIS-CORP-V45
+# ELVIS-CORP-V46
 
-艾維斯萬能事務所 · 董事長指揮中心 — V45
+艾維斯萬能事務所 · 董事長指揮中心 — V46
 
 ## 版次紀錄
+
+### V46.0 — 2026.07.17
+您回報：任務中心那句「已連上任務資料庫（Cloudflare KV）」的文字過時了——V43 起如果有綁定 `AI_COMPANY` 這個 Durable Object，實際上是透過 DO 在跑，畫面卻還是寫死「Cloudflare KV」，沒辦法一眼看出現在到底是哪一種模式，總共 4 個地方（`app.js` 大約第 815、1007、1507-1508 行，`index.html` 第 241 行）。這一版做兩件事：① 把這 4 處文字改成會正確顯示「目前是 DO 還是 KV 備援模式」；② 加一行開機時就會寫的明確 log，並新增一個 `/runtime-status` 檢查端點，之後不用再照著清單手動核對。改了 `cloudflare-worker.js`、`app.js`、`index.html` 三個檔案，沒有新增任何 Cloudflare 設定或綁定。
+
+- 【① 4 處文字怎麼修的】不是把「Cloudflare KV」直接改成「Durable Objects」——那樣沒綁 DO 的人畫面就會顯示錯誤的資訊，變成同一種寫死的問題換個方向重演一次。而是讓前端在頁面載入時實際去問後端「你現在到底是哪一種」（見下面 ②），4 個地方統一改用問到的真實答案：
+  - `app.js` 待審批「歷史批示紀錄」狀態文字、`index.html` 同一個區塊標題旁的靜態說明文字：兩處都改成讀同一次查詢結果，避免各自獨立判斷可能兜不起來
+  - `app.js` 部門看板「已連上部門任務資料庫」狀態文字
+  - `app.js` 任務中心「已連上任務資料庫」狀態文字（不管目前有沒有任務都會正確顯示）
+  - 4 個地方共用同一個 `ensureRuntimeInfo()`小工具，只會真的打一次網路請求（用 promise 快取結果），不會問後端 4 次；如果 Worker 版本比較舊、還沒有 `/runtime-status` 這支端點，或是根本沒設定 Worker 網址、請求失敗，都會優雅退回一個中性、不做具體宣稱的說法（「後端資料庫」），不會顯示錯誤資訊，也不會讓畫面壞掉
+- 【② 開機 log＋`/runtime-status` 端點怎麼做的】
+  - **Durable Object 這邊**：`AICompanyRuntime` 的建構子只會在這個 DO 執行個體第一次被啟用／從休眠喚醒時跑一次（不是每個請求都跑），是最接近「開機」的時機點，這裡加一行清楚好搜尋的 log：`Runtime 開機 = Durable Objects（AI Company Runtime 已啟用...）`，之後看 Cloudflare Dashboard 的 Logs 分頁或 `wrangler tail` 就能一眼確認
+  - **KV 備援這邊**：Workers 的模組寫法裡，只有進到 `fetch` handler 才拿得到 `env`（才知道有沒有綁 `AI_COMPANY`），純模組頂層的程式碼在那之前就執行了，沒辦法在真正的「開機」那一刻印出準確的 log。這裡改用一個模組層級的旗標，讓「這個 isolate 第一次真的確認走 KV 備援路徑」時印一次 log，之後同一個 isolate 處理的請求都不會重複印——效果上等於開機印一次，技術上準確地說是「這個 isolate 第一次確認模式的時候」，這個差異已經寫在程式碼註解裡，不含糊帶過
+  - **新的 `/runtime-status` 端點**：回傳 `runtime`（`durable-object` 或 `kv-fallback`）、`runtimeLabel`（給畫面直接顯示的中文說法）、`hasAICompanyBinding`、`hasApprovalsKvBinding`，以及只有 DO 模式才會有值的 `migratedFromKvAt`（資料是什麼時候從舊的 KV 搬過去的，讀 V43 搬家流程留下的旗標，不是另外用猜的）。判斷依據是 `AICompanyRuntime.fetch()` 跟預設匯出的 KV 備援分支，各自在請求真正處理之前就把「這次走的是哪條路徑」標記進 `env.__RUNTIME_INFO__`，`/runtime-status` 單純讀出來——確保「畫面上顯示的」跟「這次請求實際發生的」永遠是同一個事實來源，不會出現兩邊各自判斷、之後又兜不起來的問題（這正是這次要修的問題本身，新端點不能重蹈覆轍）
+- 【驗證方式】① 把真實的 `cloudflare-worker.js` 讀進 Node.js：分別模擬「沒有 `AI_COMPANY` 綁定」與「直接呼叫 `AICompanyRuntime` 本體（含用假的 DO storage 測資料搬家）」兩種情況，確認 `/runtime-status` 各自回報正確的 `runtime`／`runtimeLabel`／`migratedFromKvAt`，也確認兩種情況都真的印出對應的開機 log；另外模擬「透過預設匯出、真的綁了 `AI_COMPANY`」的完整路徑，確認正確路由到 DO。② 用 Playwright 開真的瀏覽器測 3 種情境：DO 模式、KV 備援模式、模擬舊版 Worker（`/runtime-status` 404）——確認前 4 個地方的文字都正確反映對應模式，舊版 Worker 情境下優雅退回「後端資料庫」而不是顯示壞掉的內容或 `undefined`。全數通過
+- 【您要做的事】把新的 `cloudflare-worker.js`、`app.js`、`index.html` 三個檔案更新到您的部署（Worker 跟網站資料夾各自對應的部分）即可，不需要新增任何 Cloudflare 設定或綁定；部署後可以直接開 `{您的 Worker 網址}/runtime-status` 看一次原始 JSON 回應，或者看 Cloudflare 的 Logs 確認開機 log，兩種都能一眼確認目前是哪一種模式
+
+---
 
 ### V45.0 — 2026.07.16
 董事長回報：把新版 `cloudflare-worker.js` 貼進 Cloudflare 網頁編輯器後，下方 Problems 面板出現一行錯誤：`Property 'prefix' does not exist on type '{}'. ts(2339) [Ln 2404, Col 16]`。這一版只改了 `cloudflare-worker.js` 這一個檔案，修掉這個錯誤，`index.html`（只更新頁尾版次）以外的其他檔案都沒有變動。

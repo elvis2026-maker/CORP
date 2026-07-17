@@ -210,6 +210,36 @@ function apiBase() {
   return raw.replace(/\/+$/, '');
 }
 
+// V46：董事長回報「待審批歷史／部門看板／任務中心」這幾處狀態文字寫死
+// 「Cloudflare KV」，V43 起如果有綁 AI_COMPANY 這個 Durable Object，其實是
+// 透過 DO 在跑，畫面卻沒有跟著更新，沒辦法一眼看出現在到底是哪一種模式。
+// 這裡改成實際問後端的新端點 /runtime-status，用共用的 promise 快取結果——
+// 4 個地方各自呼叫時只會真的打一次網路請求，不會重複問 4 次。
+// 沒有設定 Worker 網址、端點還沒部署（例如舊版 Worker 還沒更新）、或請求
+// 失敗，都不會讓畫面壞掉，只是退回一個中性、不做具體宣稱的說法。
+let _runtimeInfoPromise = null;
+async function ensureRuntimeInfo() {
+  if (_runtimeInfoPromise) return _runtimeInfoPromise;
+  _runtimeInfoPromise = (async () => {
+    const fallback = { runtime: 'unknown', runtimeLabel: '後端資料庫' };
+    const base = apiBase();
+    if (!base) return fallback;
+    try {
+      const res = await fetch(`${base}/runtime-status`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) return fallback;
+      return {
+        runtime: data.runtime || 'unknown',
+        runtimeLabel: data.runtimeLabel || fallback.runtimeLabel,
+      };
+    } catch (err) {
+      console.error('讀取 Runtime 狀態失敗，狀態文字先用通用說法顯示：', err);
+      return fallback;
+    }
+  })();
+  return _runtimeInfoPromise;
+}
+
 // V38：所有「寫入」動作（核准／退回、任務推進、成本上限、上傳交付檔案、
 // 新任角色）都要帶上這個標頭。如果 config.js 的 ADMIN_KEY 是空字串，就不會
 // 帶任何標頭——這時候 Worker 那邊如果有設定 ADMIN_KEY，會回 401，畫面上會用
@@ -779,7 +809,7 @@ async function loadApprovalList() {
   }
 }
 
-function renderApprovalHistory(records) {
+async function renderApprovalHistory(records) {
   approvalHistoryRecordsCache = records;
   // V41：歷史紀錄一有新資料就重新算一次「要不要顯示最近核准的淡化預覽」——
   // 這裡不知道目前待審批數字是多少，直接重用 updatePendingCountFromDom() 現成
@@ -789,6 +819,12 @@ function renderApprovalHistory(records) {
   const status = document.getElementById('approvalHistoryStatus');
   const toggleBtn = document.getElementById('approvalHistoryToggle');
   if (!list || !status) return;
+  // V46：這則說明文字原本是 index.html 裡寫死「Cloudflare KV」的靜態文字，
+  // V43 起如果有綁 DO 就不準確了，不管目前有沒有歷史紀錄都要更新，所以放在
+  // 兩個提前返回的分支之前，跟下面狀態文字共用同一次查詢結果。
+  const runtimeInfo = await ensureRuntimeInfo();
+  const kvNote = document.getElementById('approvalHistoryKvNote');
+  if (kvNote) kvNote.textContent = `核准／退回／加問動作會存進後端（${runtimeInfo.runtimeLabel}），重新整理頁面也不會消失`;
   if (!records.length) {
     list.innerHTML = '';
     list.classList.remove('is-expanded');
@@ -812,8 +848,8 @@ function renderApprovalHistory(records) {
       </div>`;
   }).join('');
   list.classList.toggle('is-expanded', approvalHistoryExpanded);
-  const cappedNote = records.length >= 100 ? '（僅顯示最新 100 筆，更早的紀錄仍完整保存在 Cloudflare KV，只是這裡不列出）' : '';
-  status.textContent = `共 ${records.length} 筆紀錄${cappedNote}（後端保存於 Cloudflare KV）`;
+  const cappedNote = records.length >= 100 ? `（僅顯示最新 100 筆，更早的紀錄仍完整保存在${runtimeInfo.runtimeLabel}，只是這裡不列出）` : '';
+  status.textContent = `共 ${records.length} 筆紀錄${cappedNote}（後端保存於${runtimeInfo.runtimeLabel}）`;
   status.classList.remove('is-error');
   if (toggleBtn) {
     if (records.length > APPROVAL_HISTORY_COLLAPSE_COUNT) {
@@ -1003,8 +1039,9 @@ async function loadBoardState() {
     // 不然任務卡片會一直顯示頁面剛載入那一刻的舊狀態。
     if (typeof loadTaskState === 'function') loadTaskState();
     if (status) {
+      const runtimeInfo = await ensureRuntimeInfo();
       status.textContent = realCount > 0
-        ? `已連上部門任務資料庫（Cloudflare KV）：${realCount} 個部門有真實任務紀錄，其餘部門顯示 org-data.js 的示範內容。`
+        ? `已連上部門任務資料庫（${runtimeInfo.runtimeLabel}）：${realCount} 個部門有真實任務紀錄，其餘部門顯示 org-data.js 的示範內容。`
         : '已連上部門任務資料庫，目前還沒有任何部門產生過真實任務紀錄（總經理委派過至少一次子任務後就會出現），以下先顯示示範內容。';
       status.classList.remove('is-error');
     }
@@ -1503,9 +1540,10 @@ async function loadTaskState() {
     const tasks = Array.isArray(data.tasks) ? data.tasks : [];
     renderTasks(tasks);
     if (status) {
+      const runtimeInfo = await ensureRuntimeInfo();
       status.textContent = tasks.length
-        ? `已連上任務資料庫（Cloudflare KV）：共 ${tasks.length} 筆正式任務，跨天、跨部門的進度都會保留。`
-        : '已連上任務資料庫（Cloudflare KV），目前還沒有任何正式任務。';
+        ? `已連上任務資料庫（${runtimeInfo.runtimeLabel}）：共 ${tasks.length} 筆正式任務，跨天、跨部門的進度都會保留。`
+        : `已連上任務資料庫（${runtimeInfo.runtimeLabel}），目前還沒有任何正式任務。`;
       status.classList.remove('is-error');
     }
   } catch (err) {

@@ -22,14 +22,16 @@
   "name": "elvis-gm-api",
   "main": "cloudflare-worker.js",
   "compatibility_date": "2026-07-01",
-
   // ---- Durable Objects：「AI Company」的核心 Runtime ----
   // binding 的名稱（AI_COMPANY）要跟 cloudflare-worker.js 裡讀取
   // env.AI_COMPANY 的名字完全一樣；class_name 要跟程式碼裡
   // `export class AICompanyRuntime` 的類別名稱完全一樣。
   "durable_objects": {
     "bindings": [
-      { "name": "AI_COMPANY", "class_name": "AICompanyRuntime" }
+      {
+        "name": "AI_COMPANY",
+        "class_name": "AICompanyRuntime"
+      }
     ]
   },
   // migrations 是「告訴 Cloudflare 這是一個全新的 Durable Object 類別」的
@@ -37,9 +39,13 @@
   // migration。new_sqlite_classes（而不是 new_classes）是刻意選的：
   // SQLite 儲存後端是 Workers 免費方案就能用的版本，不需要升級付費方案。
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["AICompanyRuntime"] }
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "AICompanyRuntime"
+      ]
+    }
   ],
-
   // ---- 沿用既有的 KV／R2 綁定 ----
   // 這兩個綁定您應該已經在 Dashboard 設定過了（V20 的 APPROVALS_KV、V31 的
   // DELIVERY_R2）；這裡列出來只是讓 Wrangler 部署時知道要保留這兩個綁定，
@@ -48,12 +54,17 @@
   // （Wrangler 部署後，這兩個綁定如果 Dashboard 上已經有了，通常會自動對齊，
   // 但保險起見還是建議照實際值填寫）。
   "kv_namespaces": [
-    { "binding": "APPROVALS_KV", "id": "請填入您 Dashboard 上 KV 命名空間的 ID" }
+    {
+      "binding": "APPROVALS_KV",
+      "id": "2efbd65b615d4f769b746af64e754917"
+    }
   ],
   "r2_buckets": [
-    { "binding": "DELIVERY_R2", "bucket_name": "請填入您 Dashboard 上 R2 儲存貯體的名稱" }
+    {
+      "binding": "DELIVERY_R2",
+      "bucket_name": "elvis-delivery"
+    }
   ]
-
   // 注意：GEMINI_API_KEY 等各種密鑰、ALLOWED_ORIGIN、ADMIN_KEY、
   // DAILY_COST_LIMIT_USD 這些環境變數／密鑰，不要寫進這份檔案裡（這份檔案
   // 通常會被視為原始碼的一部分，寫密鑰進去等於把密鑰外流的風險）。這些

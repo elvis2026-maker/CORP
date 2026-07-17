@@ -1,0 +1,62 @@
+// ============================================================
+// wrangler.jsonc — V43 新增：Durable Objects 需要的部署設定檔
+// ------------------------------------------------------------
+// 這是這個專案第一次需要這份檔案。V13～V42 一路以來，cloudflare-worker.js
+// 都是直接複製貼上到 Cloudflare Dashboard 的「Edit code」編輯器裡按 Deploy
+// 就能上線，KV／R2 這些綁定也都是在 Dashboard 的 Settings → Bindings 頁面
+// 用滑鼠點一點加上去的，完全不需要在自己電腦上裝任何工具。
+//
+// Durable Objects 不一樣：Cloudflare 目前要求「建立一個新的 Durable Object
+// 類別＋這是它第一次啟用」這個動作，必須透過 Wrangler（Cloudflare 官方的
+// 命令列部署工具）搭配這份設定檔一起送出，單純在 Dashboard 網頁編輯器裡貼
+// 程式碼是無法建立新的 Durable Object 類別的。這代表從這一版開始，第一次
+// 部署需要在您自己的電腦上安裝 Node.js 跟 Wrangler，跑幾行命令——只有「第一
+// 次啟用」需要這樣做；之後如果只是修改 cloudflare-worker.js 裡的程式邏輯
+// （不是新增/砍掉 Durable Object 類別本身），一樣可以繼續回到 Dashboard 網頁
+// 編輯器貼上、按 Deploy，不需要每次都重新跑命令列。詳細步驟都寫在 README.md
+// 的「V43 設定方法」那一節，這裡只放設定檔本身。
+//
+// name 這一行請改成您 Cloudflare Dashboard 上，這支 Worker 目前實際的名稱
+// （通常就是網址 https://「這裡這一段」.你的帳號.workers.dev 裡的那一段）。
+{
+  "name": "elvis-gm-api",
+  "main": "cloudflare-worker.js",
+  "compatibility_date": "2026-07-01",
+
+  // ---- Durable Objects：「AI Company」的核心 Runtime ----
+  // binding 的名稱（AI_COMPANY）要跟 cloudflare-worker.js 裡讀取
+  // env.AI_COMPANY 的名字完全一樣；class_name 要跟程式碼裡
+  // `export class AICompanyRuntime` 的類別名稱完全一樣。
+  "durable_objects": {
+    "bindings": [
+      { "name": "AI_COMPANY", "class_name": "AICompanyRuntime" }
+    ]
+  },
+  // migrations 是「告訴 Cloudflare 這是一個全新的 Durable Object 類別」的
+  // 一次性宣告，只有第一次建立時需要這一段；之後改程式邏輯不需要新增
+  // migration。new_sqlite_classes（而不是 new_classes）是刻意選的：
+  // SQLite 儲存後端是 Workers 免費方案就能用的版本，不需要升級付費方案。
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AICompanyRuntime"] }
+  ],
+
+  // ---- 沿用既有的 KV／R2 綁定 ----
+  // 這兩個綁定您應該已經在 Dashboard 設定過了（V20 的 APPROVALS_KV、V31 的
+  // DELIVERY_R2）；這裡列出來只是讓 Wrangler 部署時知道要保留這兩個綁定，
+  // 不會因為改用 wrangler deploy 就把它們洗掉。id／bucket_name 麻煩照您
+  // Dashboard 上實際看到的值填入，或是留著用 Dashboard 補設定也可以
+  // （Wrangler 部署後，這兩個綁定如果 Dashboard 上已經有了，通常會自動對齊，
+  // 但保險起見還是建議照實際值填寫）。
+  "kv_namespaces": [
+    { "binding": "APPROVALS_KV", "id": "請填入您 Dashboard 上 KV 命名空間的 ID" }
+  ],
+  "r2_buckets": [
+    { "binding": "DELIVERY_R2", "bucket_name": "請填入您 Dashboard 上 R2 儲存貯體的名稱" }
+  ]
+
+  // 注意：GEMINI_API_KEY 等各種密鑰、ALLOWED_ORIGIN、ADMIN_KEY、
+  // DAILY_COST_LIMIT_USD 這些環境變數／密鑰，不要寫進這份檔案裡（這份檔案
+  // 通常會被視為原始碼的一部分，寫密鑰進去等於把密鑰外流的風險）。這些
+  // 維持原本的做法：在 Cloudflare Dashboard 的 Settings → Variables and
+  // Secrets 裡設定，跟以前完全一樣，不受這次改用 Wrangler 部署影響。
+}

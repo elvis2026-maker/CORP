@@ -1,8 +1,32 @@
-# ELVIS-CORP-V44
+# ELVIS-CORP-V45
 
-艾維斯萬能事務所 · 董事長指揮中心 — V44
+艾維斯萬能事務所 · 董事長指揮中心 — V45
 
 ## 版次紀錄
+
+### V45.0 — 2026.07.16
+董事長回報：把新版 `cloudflare-worker.js` 貼進 Cloudflare 網頁編輯器後，下方 Problems 面板出現一行錯誤：`Property 'prefix' does not exist on type '{}'. ts(2339) [Ln 2404, Col 16]`。這一版只改了 `cloudflare-worker.js` 這一個檔案，修掉這個錯誤，`index.html`（只更新頁尾版次）以外的其他檔案都沒有變動。
+
+- 【先說清楚：這不是執行期會出錯的 bug】Cloudflare 的網頁程式碼編輯器對 `.js` 檔也會做 TypeScript 型別推斷（即使檔案本身是純 JavaScript），這一行報錯是編輯器「型別檢查」層級的誤判，不是程式邏輯真的錯了——純 JavaScript 執行完全沒有問題，Worker 照樣能正常運作與部署。但錯誤圖示掛在那裡容易讓人誤以為程式壞了，所以還是修掉比較好，讓 Problems 面板乾乾淨淨。
+- 【根本原因】問題出在 V43 新增的 `DOStorageAsKV`（把 Durable Object 的儲存介面包裝成 KV 形狀的介面卡）裡的 `list()` 方法，原本寫成：
+  ```js
+  async list({ prefix } = {}) {
+  ```
+  這種「函式參數上直接解構、又給空物件字面量 `{}` 當預設值」的寫法，會讓 TypeScript 把這個參數的型別**單獨**推斷成「完全不含任何屬性的空物件型別 `{}`」，於是解構出 `prefix` 這個屬性就被判定為存取了一個不存在的屬性，觸發 `ts(2339)` 這個型別錯誤。
+- 【怎麼修的】改成不在函式參數上解構，直接在函式本體內安全地讀 `options && options.prefix`，繞開這個型別推斷的誤判，執行邏輯完全不變：
+  ```js
+  async list(options) {
+    const prefix = options && options.prefix;
+    const map = await this.storage.list(prefix ? { prefix } : {});
+    ...
+  }
+  ```
+- 【順便確認了一件事】您截圖裡 Preview 面板顯示的 `{"error":"Method not allowed"}` 是**正常、預期中的行為**，不是另一個 bug——Cloudflare 的 Preview 面板會對 Worker 網址送一個單純的 GET 請求測試看看有沒有回應，但這支 Worker 的主要對話端點設計上只接受 POST（GET 請求本來就該被擋下來），所以看到這個 JSON 錯誤訊息是正確、健康的反應，代表 Worker 有在正常運作、路由邏輯有正確擋下不該通過的請求方法，不需要特別處理。
+- 【驗證方式】把真實的 `cloudflare-worker.js` 用 TypeScript 編譯器（`tsc`，`checkJs` 模式，比照 Cloudflare 編輯器實際使用的寬鬆設定，不開 `strict`）完整檢查一次：**修正前**確認能重現董事長截圖裡一模一樣的那一行錯誤（型別、行號、錯誤代碼都對得上）；**修正後**確認整支 2500 行的檔案零錯誤零警告。另外也用 `node --check` 確認純 JavaScript 語法本身完全正確（修正前後都是，再次驗證這從頭到尾都只是編輯器型別提示的誤判，不影響實際執行）。也順便搜尋過整份檔案，確認這種「參數解構＋空物件預設值」的寫法只有這一處，沒有其他地方潛藏同樣的誤報。
+- 【您要做的事】把新的 `cloudflare-worker.js` 貼到 Cloudflare Worker 編輯器重新部署即可（照舊直接在網頁編輯器貼上即可，這次沒有動到 Durable Object 類別本身，不需要重新跑 Wrangler、不需要新的 migration）；`index.html` 只改了頁尾版次號碼，要不要一起換上都可以，不影響功能。
+- 版次與頁尾同步更新為 V45.0 · 2026.07.16
+
+---
 
 ### V44.0 — 2026.07.16
 這一版把待辦清單裡「對話框裡送出的附件比照交付中心，實際存進 Cloudflare R2」這一項做掉：**附件與資料持久化（DO SQLite + Cloudflare R2）**。只改了 `cloudflare-worker.js`、`app.js` 兩個檔案，`index.html`／`styles.css`／`org-data.js`／`delivery-data.js`／`config.js`／`wrangler.jsonc` 都沒有動；**不需要新增任何 Cloudflare 綁定**——檔案本體沿用 V31 就綁好的 `DELIVERY_R2`，中繼資料沿用 V43 剛建好的 Durable Object（`AI_COMPANY`）內建 SQLite，兩個都是「已經在用」的既有設施，不用再多開一個 R2 儲存貯體或另外申請什麼。

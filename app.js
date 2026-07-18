@@ -935,6 +935,100 @@ async function loadApprovalHistory() {
 }
 loadApprovalHistory();
 
+// ============================================================================
+// V47：治理稽核紀錄 Audit Log（唯讀，前端不能寫入）——建立可追蹤、可審批的
+// 治理機制。跟上面的「歷史批示紀錄」不一樣的地方：批示紀錄只記錄核准／退回／
+// 加問這一件事，Audit Log 涵蓋範圍更廣，把系統裡所有「有治理意義」的動作
+// 統一收在一個地方：核准/退回/加問、任務建立/推進/取消/編輯工作流程、新任
+// 角色、成本停損上限調整、交付項目上傳/編輯/刪除——各自的原始資料完全沒有
+// 被取代，這是「多寫一份」統一格式的摘要，方便一次查閱。渲染邏輯（收合到 3
+// 則、展開按鈕、快取重繪）直接沿用歷史批示紀錄的既有做法，保持一致的操作體驗。
+// ============================================================================
+const AUDIT_LOG_COLLAPSE_COUNT = 3;
+let auditLogExpanded = false;
+let auditLogRecordsCache = [];
+const AUDIT_ACTION_LABEL = {
+  'approval.approve': '✓ 核准', 'approval.reject': '✕ 退回', 'approval.ask': '… 加問',
+  'task.create': '📋 建立任務', 'task.advance': '⏭ 推進步驟', 'task.cancel': '✕ 取消任務',
+  'task.edit_steps': '✎ 編輯工作流程',
+  'org.hire': '🧑‍💼 新任角色', 'cost.set_limit': '💰 調整停損上限',
+  'delivery.upload': '📦 上傳交付項目', 'delivery.edit': '✎ 編輯交付項目', 'delivery.delete': '🗑 刪除交付項目',
+};
+
+function renderAuditLog(records) {
+  const list = document.getElementById('auditLogList');
+  const status = document.getElementById('auditLogStatus');
+  const toggleBtn = document.getElementById('auditLogToggle');
+  if (!list || !status) return;
+  if (!records.length) {
+    list.innerHTML = '';
+    list.classList.remove('is-expanded');
+    status.textContent = '目前還沒有稽核紀錄，系統裡發生的治理動作會顯示在這裡。';
+    status.classList.remove('is-error');
+    if (toggleBtn) toggleBtn.hidden = true;
+    return;
+  }
+  const visible = auditLogExpanded ? records : records.slice(0, AUDIT_LOG_COLLAPSE_COUNT);
+  list.innerHTML = visible.map(r => {
+    const label = AUDIT_ACTION_LABEL[r.action] || r.action;
+    const when = r.at ? new Date(r.at).toLocaleString('zh-TW', { hour12: false }) : '';
+    return `
+      <div class="audit-log-item">
+        <span class="audit-badge">${label}</span>
+        <div class="audit-body">
+          <p class="audit-target">${(r.targetLabel || r.targetId || '（未命名對象）').replace(/</g, '&lt;')}</p>
+          <p class="audit-meta">${r.actor || ''} · ${when}${r.detail ? ' · ' + r.detail.replace(/</g, '&lt;') : ''}</p>
+        </div>
+      </div>`;
+  }).join('');
+  list.classList.toggle('is-expanded', auditLogExpanded);
+  const cappedNote = records.length >= 300 ? '（僅顯示最新 300 筆，更早的紀錄仍完整保存在後端，只是這裡不列出）' : '';
+  status.textContent = `共 ${records.length} 筆稽核紀錄${cappedNote}`;
+  status.classList.remove('is-error');
+  if (toggleBtn) {
+    if (records.length > AUDIT_LOG_COLLAPSE_COUNT) {
+      toggleBtn.hidden = false;
+      toggleBtn.textContent = auditLogExpanded ? '只看最近幾筆 ▲' : `展開全部 ${records.length} 筆 ▼`;
+    } else {
+      toggleBtn.hidden = true;
+    }
+  }
+}
+document.getElementById('auditLogToggle')?.addEventListener('click', () => {
+  auditLogExpanded = !auditLogExpanded;
+  renderAuditLog(auditLogRecordsCache);
+});
+
+async function loadAuditLog() {
+  const status = document.getElementById('auditLogStatus');
+  const base = apiBase();
+  if (!base) {
+    if (status) {
+      status.textContent = '尚未設定 Worker 網址，稽核紀錄無法讀取。';
+      status.classList.add('is-error');
+    }
+    return;
+  }
+  try {
+    const res = await fetch(`${base}/audit-log`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    if (data.error && (!data.records || !data.records.length)) {
+      if (status) { status.textContent = data.error; status.classList.add('is-error'); }
+      return;
+    }
+    auditLogRecordsCache = Array.isArray(data.records) ? data.records : [];
+    renderAuditLog(auditLogRecordsCache);
+  } catch (err) {
+    console.error('讀取稽核紀錄失敗：', err);
+    if (status) {
+      status.textContent = '目前連不上稽核紀錄服務，稍後重新整理頁面再試一次。';
+      status.classList.add('is-error');
+    }
+  }
+}
+loadAuditLog();
+
 // ---------------- V23：部門即時看板改為串接真實任務資料庫 ----------------
 // org-data.js 裡的 board 內容原本是固定寫死的示範資料（task／log／progress
 // 永遠一樣）。這裡改成頁面載入時去讀 Worker 的 /board-state：如果某個部門已經
@@ -1375,6 +1469,76 @@ function buildTaskStepHtml(step) {
         </div>
       </div>`;
 }
+// ============================================================================
+// V47：可手動編輯任務步驟 Workflow Editor——支援人工調整 AI 工作流程
+// ----------------------------------------------------------------------------
+// 已完成／已退回的步驟（鎖住的前綴）唯讀顯示，不能碰；還沒真的執行過的步驟
+// （pending 或正卡在等董事長裁示的 awaiting_approval）才能編輯——新增、刪除、
+// 修改內容都算。存檔會整包送去 /task-edit-steps，後端會拼回「鎖住的前綴＋
+// 新的可編輯範圍」並直接自動繼續執行，細節見 cloudflare-worker.js 的說明。
+const DEPT_OPTIONS_HTML = ORG_REGISTRY.map(r => `<option value="${r.id}">${escapeBoardText(r.nameOrg || r.name)}</option>`).join('');
+
+function buildWorkflowEditorRowHtml(step) {
+  const roleName = step?.roleName || '';
+  const roleNick = step?.roleNick || '';
+  const desc = step?.description || '';
+  const needsApproval = !!step?.needsApproval;
+  const approvalReason = step?.approvalReason || '';
+  return `
+    <div class="wf-row">
+      <select class="wf-dept">${DEPT_OPTIONS_HTML}</select>
+      <input class="wf-role-name" type="text" placeholder="角色全名（例如 業務策略師）" maxlength="40" value="${roleName.replace(/"/g, '&quot;')}">
+      <input class="wf-role-nick" type="text" placeholder="暱稱（例如 小業）" maxlength="20" value="${roleNick.replace(/"/g, '&quot;')}">
+      <textarea class="wf-desc" placeholder="這個步驟具體要做什麼" maxlength="300" rows="2">${desc.replace(/</g, '&lt;')}</textarea>
+      <label class="wf-approval-toggle"><input type="checkbox" class="wf-needs-approval" ${needsApproval ? 'checked' : ''}> 需要董事長核准才能執行</label>
+      <input class="wf-approval-reason" type="text" placeholder="為什麼需要核准（選填）" maxlength="200" value="${approvalReason.replace(/"/g, '&quot;')}" ${needsApproval ? '' : 'hidden'}>
+      <button type="button" class="wf-remove-row" data-wf-remove-step title="移除這個步驟">✕ 移除</button>
+    </div>`;
+}
+
+function buildWorkflowEditorHtml(task) {
+  let lockedCount = 0;
+  while (lockedCount < task.steps.length
+    && (task.steps[lockedCount].status === 'done' || task.steps[lockedCount].status === 'rejected')) {
+    lockedCount++;
+  }
+  const lockedSteps = task.steps.slice(0, lockedCount);
+  const editableSteps = task.steps.slice(lockedCount);
+  const lockedHtml = lockedSteps.length
+    ? `<div class="wf-locked-group">
+         <p class="wf-locked-title">🔒 已完成／已退回的步驟（唯讀，不能編輯）</p>
+         ${lockedSteps.map(s => `<div class="wf-locked-step">${escapeBoardText(s.deptName)}・${escapeBoardText(s.roleNick)}　${escapeBoardText(s.description)}</div>`).join('')}
+       </div>`
+    : '';
+  return `
+    <div class="wf-editor-inner">
+      ${lockedHtml}
+      <p class="wf-editable-title">✎ 還沒執行的步驟（可以新增、刪除、修改）</p>
+      <div class="wf-rows" data-wf-rows>
+        ${editableSteps.length ? editableSteps.map(buildWorkflowEditorRowHtml).join('') : buildWorkflowEditorRowHtml(null)}
+      </div>
+      <button type="button" class="wf-add-row" data-wf-add-step>＋ 新增步驟</button>
+      <div class="wf-editor-actions">
+        <button type="button" class="wf-save" data-wf-save="${task.id}" data-wf-locked-count="${lockedCount}">儲存並繼續執行</button>
+        <button type="button" class="wf-cancel" data-wf-cancel="${task.id}">取消編輯</button>
+        <span class="wf-editor-status" data-wf-status-for="${task.id}"></span>
+      </div>
+    </div>`;
+}
+
+// 存好的 <select> 目前值沒辦法用字串模板直接設定「選中哪一個」，
+// 這裡渲染完 DOM 之後，逐列把 select.value 設回這個步驟原本的部門
+function applyWorkflowEditorSelectValues(container, editableSteps) {
+  const rows = container.querySelectorAll('[data-wf-rows] .wf-row');
+  rows.forEach((row, i) => {
+    const dept = editableSteps[i]?.deptId;
+    if (dept) {
+      const select = row.querySelector('.wf-dept');
+      if (select) select.value = dept;
+    }
+  });
+}
+
 function buildTaskCardHtml(task) {
   const meta = TASK_STATUS_META[task.status] || { dot: 's-idle', label: task.status };
   const doneCount = task.steps.filter(s => s.status === 'done').length;
@@ -1405,8 +1569,10 @@ function buildTaskCardHtml(task) {
           <div class="tc-meta"><span>${doneCount}/${total} 步驟完成</span><span>${estimatedText}${estimatedText ? ' · ' : ''}建立於 ${formatTaskTime(task.createdAt)}</span></div>
         </summary>
         <div class="tc-steps">${task.steps.map(buildTaskStepHtml).join('')}</div>
+        <div class="tc-workflow-editor" id="wf-editor-${task.id}" hidden></div>
         <div class="tc-actions">
           <button type="button" class="tc-advance" data-task-advance="${task.id}" ${canAdvance ? '' : 'disabled'}>推進下一步</button>
+          <button type="button" class="tc-edit-workflow" data-task-edit="${task.id}" ${isTerminal ? 'disabled' : ''}>✎ 編輯工作流程</button>
           <button type="button" class="tc-cancel" data-task-cancel="${task.id}" ${isTerminal ? 'disabled' : ''}>取消任務</button>
           ${advanceHint}
           <span class="tc-action-status" data-task-status-for="${task.id}"></span>
@@ -1560,6 +1726,121 @@ async function loadTaskState() {
 const taskGridEl = document.getElementById('taskGrid');
 if (taskGridEl) {
   taskGridEl.addEventListener('click', async (e) => {
+    // 需要核准的核取方塊被點擊時，順便切換旁邊「為什麼需要核准」欄位的顯示——
+    // 不需要核准的步驟沒必要填這個理由，隱藏起來畫面更乾淨
+    if (e.target.classList && e.target.classList.contains('wf-needs-approval')) {
+      const reasonInput = e.target.closest('.wf-row')?.querySelector('.wf-approval-reason');
+      if (reasonInput) reasonInput.hidden = !e.target.checked;
+      return;
+    }
+
+    // ---- V47：工作流程編輯器 ----
+    const editBtn = e.target.closest('[data-task-edit]');
+    if (editBtn) {
+      e.preventDefault();
+      const taskId = editBtn.dataset.taskEdit;
+      const editorEl = document.getElementById(`wf-editor-${taskId}`);
+      if (!editorEl) return;
+      const task = lastLoadedTasks.find(t => t.id === taskId);
+      if (!task) return;
+      const isOpen = !editorEl.hidden;
+      if (isOpen) {
+        editorEl.hidden = true;
+        editorEl.innerHTML = '';
+        editBtn.textContent = '✎ 編輯工作流程';
+      } else {
+        editorEl.innerHTML = buildWorkflowEditorHtml(task);
+        let lockedCount = 0;
+        while (lockedCount < task.steps.length
+          && (task.steps[lockedCount].status === 'done' || task.steps[lockedCount].status === 'rejected')) {
+          lockedCount++;
+        }
+        applyWorkflowEditorSelectValues(editorEl, task.steps.slice(lockedCount));
+        editorEl.hidden = false;
+        editBtn.textContent = '收合編輯畫面';
+      }
+      return;
+    }
+
+    const addRowBtn = e.target.closest('[data-wf-add-step]');
+    if (addRowBtn) {
+      e.preventDefault();
+      const rowsEl = addRowBtn.closest('.wf-editor-inner')?.querySelector('[data-wf-rows]');
+      if (rowsEl) rowsEl.insertAdjacentHTML('beforeend', buildWorkflowEditorRowHtml(null));
+      return;
+    }
+
+    const removeRowBtn = e.target.closest('[data-wf-remove-step]');
+    if (removeRowBtn) {
+      e.preventDefault();
+      const rowsEl = removeRowBtn.closest('[data-wf-rows]');
+      const row = removeRowBtn.closest('.wf-row');
+      if (rowsEl && row) {
+        // 至少留一列，全部移除的話任務會變成沒有任何可編輯步驟——留一列空白讓
+        // 使用者自己填，比讓編輯畫面整個變空白、不知道怎麼繼續填更清楚
+        if (rowsEl.querySelectorAll('.wf-row').length > 1) row.remove();
+        else row.replaceWith(document.createRange().createContextualFragment(buildWorkflowEditorRowHtml(null)));
+      }
+      return;
+    }
+
+    const cancelEditBtn = e.target.closest('[data-wf-cancel]');
+    if (cancelEditBtn) {
+      e.preventDefault();
+      const taskId = cancelEditBtn.dataset.wfCancel;
+      const editorEl = document.getElementById(`wf-editor-${taskId}`);
+      const editBtnEl = taskGridEl.querySelector(`[data-task-edit="${taskId}"]`);
+      if (editorEl) { editorEl.hidden = true; editorEl.innerHTML = ''; }
+      if (editBtnEl) editBtnEl.textContent = '✎ 編輯工作流程';
+      return;
+    }
+
+    const saveBtn = e.target.closest('[data-wf-save]');
+    if (saveBtn) {
+      e.preventDefault();
+      const taskId = saveBtn.dataset.wfSave;
+      const editorEl = document.getElementById(`wf-editor-${taskId}`);
+      const statusEl = editorEl?.querySelector(`[data-wf-status-for="${taskId}"]`);
+      if (!editorEl) return;
+      const rows = [...editorEl.querySelectorAll('[data-wf-rows] .wf-row')];
+      const steps = rows.map(row => ({
+        deptId: row.querySelector('.wf-dept')?.value || '',
+        roleName: row.querySelector('.wf-role-name')?.value.trim() || '',
+        roleNick: row.querySelector('.wf-role-nick')?.value.trim() || '',
+        description: row.querySelector('.wf-desc')?.value.trim() || '',
+        needsApproval: row.querySelector('.wf-needs-approval')?.checked || false,
+        approvalReason: row.querySelector('.wf-approval-reason')?.value.trim() || '',
+      })).filter(s => s.deptId && s.description);
+      if (!steps.length) {
+        if (statusEl) { statusEl.textContent = '至少要保留一個步驟（部門與內容都要填）'; statusEl.classList.add('is-error'); }
+        return;
+      }
+      const base = apiBase();
+      if (!base) return;
+      saveBtn.disabled = true;
+      if (statusEl) { statusEl.textContent = '儲存中，可能需要幾秒鐘…'; statusEl.classList.remove('is-error'); }
+      try {
+        const res = await fetch(`${base}/task-edit-steps`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+          body: JSON.stringify({ taskId, steps }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+        editorEl.hidden = true;
+        editorEl.innerHTML = '';
+        await loadTaskState(); // 重新整個讀一次，畫面會換成後端拼回來的最終版本（鎖住的前綴＋新的可編輯範圍）
+        loadApprovalList(); // 編輯可能讓某個待審批項目被標記成 superseded，或立刻產生新的裁示關卡
+        loadBoardState();
+        loadAuditLog(); // V47：編輯工作流程本身就是需要被稽核的治理動作
+      } catch (err) {
+        console.error('儲存工作流程失敗：', err);
+        if (statusEl) { statusEl.textContent = `儲存失敗：${err.message || err}`; statusEl.classList.add('is-error'); }
+        saveBtn.disabled = false;
+      }
+      return;
+    }
+
     const advanceBtn = e.target.closest('[data-task-advance]');
     const cancelBtn = e.target.closest('[data-task-cancel]');
     const btn = advanceBtn || cancelBtn;
@@ -1584,6 +1865,7 @@ if (taskGridEl) {
       await loadTaskState(); // 直接整個重新讀一次任務清單，確保畫面跟後端完全一致
       loadApprovalList(); // 取消任務可能連帶關閉一張待審批項目，這裡一併刷新
       loadBoardState(); // 推進下一步如果成功執行了步驟，部門看板也要跟著更新
+      loadAuditLog(); // V47：推進/取消都是治理事件，稽核紀錄也要跟著更新
       // V35：後端現在把接下來的步驟丟到背景執行（data.started 為 true），這裡
       // 剛讀回來的狀態可能還沒反映最新進度，上面已經開始的輪詢（每 6 秒）會
       // 自動接手更新。loadTaskState() 剛剛整個重畫過任務卡片，原本抓到的
@@ -1761,6 +2043,7 @@ if (approvalListEl) {
         loadTaskState(); // 核准／退回可能讓任務往下推進了，重新整理任務中心
         loadBoardState(); // 核准的步驟如果真的執行了，部門看板也要跟著更新
         loadApprovalHistory();
+        loadAuditLog(); // V47：核准/退回/加問是核心治理事件，稽核紀錄要跟著更新
       } else if (note) {
         note.className = 'approval-resolved-note show';
         note.style.color = 'var(--risk-high)';

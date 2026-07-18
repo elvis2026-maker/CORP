@@ -515,6 +515,52 @@
   .tc-actions .tc-action-status.is-error{color:var(--risk-high);}
   .tc-actions .tc-action-hint{font-size:11.5px; color:var(--violet); align-self:center; font-weight:600;}
 
+  /* ---------- V47：Workflow Editor（手動編輯任務步驟）---------- */
+  .tc-actions button.tc-edit-workflow:hover{border-color:var(--violet); color:var(--violet);}
+  .tc-workflow-editor{margin-top:10px;}
+  .wf-editor-inner{
+    padding:14px 16px; border-radius:12px; border:1px dashed var(--line-strong); background:var(--paper);
+  }
+  .wf-locked-group{margin-bottom:14px; padding-bottom:12px; border-bottom:1px dashed var(--line-strong);}
+  .wf-locked-title, .wf-editable-title{font-size:12px; font-weight:700; color:var(--ink-soft); margin:0 0 8px;}
+  .wf-locked-step{
+    font-size:12px; color:var(--ink-faint); padding:6px 10px; border-radius:8px; background:var(--card);
+    margin-bottom:5px; opacity:.75;
+  }
+  .wf-rows{display:flex; flex-direction:column; gap:10px;}
+  .wf-row{
+    display:grid; grid-template-columns:1fr 1fr; gap:6px 8px; padding:10px; border-radius:10px;
+    background:var(--card); border:1px solid var(--line);
+  }
+  .wf-row .wf-desc{grid-column:1 / -1;}
+  .wf-row .wf-approval-toggle{grid-column:1 / -1; font-size:11.5px; color:var(--ink-soft); display:flex; align-items:center; gap:6px;}
+  .wf-row .wf-approval-reason{grid-column:1 / -1;}
+  .wf-row .wf-remove-row{grid-column:1 / -1; justify-self:end;}
+  .wf-row select, .wf-row input[type="text"], .wf-row textarea{
+    font-family:inherit; font-size:12.5px; padding:6px 9px; border-radius:8px;
+    border:1px solid var(--line-strong); color:var(--ink); background:var(--paper); resize:vertical;
+  }
+  .wf-row .wf-remove-row{
+    font-family:inherit; font-size:11.5px; font-weight:600; border-radius:999px; padding:5px 12px;
+    cursor:pointer; border:1px solid var(--line-strong); background:var(--card); color:var(--risk-high);
+  }
+  .wf-add-row{
+    margin-top:10px; font-family:inherit; font-size:12px; font-weight:600; border-radius:999px; padding:7px 16px;
+    cursor:pointer; border:1px dashed var(--line-strong); background:var(--card); color:var(--violet);
+  }
+  .wf-editor-actions{display:flex; gap:8px; margin-top:14px; align-items:center; flex-wrap:wrap;}
+  .wf-save{
+    font-family:inherit; font-size:12px; font-weight:600; border-radius:999px; padding:7px 16px;
+    cursor:pointer; border:1px solid var(--gm); background:var(--gm); color:#fff;
+  }
+  .wf-cancel{
+    font-family:inherit; font-size:12px; font-weight:600; border-radius:999px; padding:7px 16px;
+    cursor:pointer; border:1px solid var(--line-strong); background:var(--card); color:var(--ink-soft);
+  }
+  .wf-save:disabled{opacity:.5; cursor:not-allowed;}
+  .wf-editor-status{font-size:11.5px; color:var(--ink-faint);}
+  .wf-editor-status.is-error{color:var(--risk-high);}
+
   /* ---------- V42: 任務中心・已完成／已取消任務淡化收合區 ---------- */
   .task-all-done-note{font-size:12.5px; color:var(--ink-faint); padding:10px 0;}
   .task-done-section{margin-top:16px; padding-top:14px; border-top:1px dashed var(--line);}
@@ -803,6 +849,28 @@
   .approval-history-item .hist-meta{color:var(--ink-faint); font-size:11px; margin-top:2px;}
   .approval-history-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
   .approval-history-status.is-error{color:var(--risk-high);}
+
+  /* ---------- V47：治理稽核紀錄 Audit Log ---------- */
+  .audit-log-list{display:flex; flex-direction:column; gap:8px; margin-top:12px;}
+  .audit-log-list.is-expanded{max-height:440px; overflow-y:auto; padding-right:6px;}
+  .audit-log-toggle{
+    margin-top:10px; font-size:12px; font-weight:700; color:var(--violet);
+    background:none; border:none; padding:0; cursor:pointer; font-family:inherit;
+  }
+  .audit-log-toggle:hover{text-decoration:underline;}
+  .audit-log-item{
+    display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border-radius:9px;
+    background:var(--bg-soft, #f6f7fb); border:1px solid var(--line); font-size:12px; line-height:1.6;
+  }
+  .audit-log-item .audit-badge{
+    flex:0 0 auto; font-weight:700; padding:2px 8px; border-radius:999px; font-size:11px;
+    background:rgba(90,90,220,.12); color:var(--violet); white-space:nowrap;
+  }
+  .audit-log-item .audit-body{flex:1 1 auto; min-width:0;}
+  .audit-log-item .audit-target{font-weight:600; color:var(--ink); margin:0;}
+  .audit-log-item .audit-meta{color:var(--ink-faint); font-size:11px; margin:2px 0 0;}
+  .audit-log-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
+  .audit-log-status.is-error{color:var(--risk-high);}
   .board-sync-status{margin-top:8px; font-size:11px; color:var(--ink-faint);}
   .board-sync-status.is-error{color:var(--risk-high);}
   .bc-demo-tag{

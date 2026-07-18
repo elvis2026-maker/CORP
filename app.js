@@ -111,10 +111,12 @@ function renderDelivery(items, orgRegistry) {
       ? `<a class="dlist-btn" href="${d.downloadUrl}" download target="_blank" rel="noopener noreferrer">下載</a>`
       : `<button type="button" class="dlist-btn is-disabled" disabled title="這個項目還沒有可下載的檔案，等實際完成後可以在下方表單填網址或上傳檔案">下載</button>`;
     const demoTag = d.isDemoItem ? '<i class="bc-demo-tag delivery-demo-tag">示範內容</i>' : '';
+    const workspaceTag = d.isWorkspaceItem ? '<i class="bc-demo-tag delivery-workspace-tag">🤖 AI Agent 產出</i>' : '';
     // V41：董事長要求「自己上傳的要能編輯或刪除」——示範內容（isDemoItem）本來
     // 就不在後端 KV 裡，沒有 id 可以編輯／刪除，只有真實項目（dv-real- 開頭）
-    // 才顯示這兩顆按鈕。
-    const editActionsHtml = (!d.isDemoItem)
+    // 才顯示這兩顆按鈕。V48：Project Workspace 的項目（AI Agent 透過工具產出的
+    // 檔案）也還沒有編輯／刪除的後端支援，一併排除，避免顯示按鈕點下去卻沒作用。
+    const editActionsHtml = (!d.isDemoItem && !d.isWorkspaceItem)
       ? `<button type="button" class="dlist-btn dlist-btn-edit" data-delivery-edit="${d.id}">編輯</button>
          <button type="button" class="dlist-btn dlist-btn-delete" data-delivery-delete="${d.id}">刪除</button>`
       : '';
@@ -122,7 +124,7 @@ function renderDelivery(items, orgRegistry) {
         <div class="dlist-row">
           <span class="dlist-icon ${dotClass}" aria-hidden="true">${rowIcon}</span>
           <div class="dlist-main">
-            <p class="dlist-title">${d.title}${demoTag}</p>
+            <p class="dlist-title">${d.title}${demoTag}${workspaceTag}</p>
             <p class="dlist-desc">${d.desc || ''}</p>
           </div>
           <div class="dlist-meta">
@@ -552,6 +554,9 @@ form.addEventListener('submit', (e) => {
       // V23：Worker 那邊已經把這筆任務寫進部門看板的後端資料了，這裡重新讀一次
       // /board-state，讓「部門即時看板」馬上顯示剛剛發生的真實任務，不用等重新整理頁面
       loadBoardState();
+      // V48：這個角色這次可能透過 Project Workspace 工具真的存了檔案，重新讀一次
+      // 交付中心，讓新產出的檔案不用等重新整理頁面就看得到
+      loadDeliveryState();
     }
     // V32：GM 判斷這件事需要建立正式任務時（跟上面的子任務互斥，後端只會回傳其中一種），
     // 插入一張輕量的「已建立正式任務」提示卡片，完整的步驟清單與進度顯示在下方
@@ -1209,17 +1214,55 @@ async function loadDeliveryState() {
       downloadUrl: it.downloadUrl || (it.hasDownload ? `${base}/delivery-file?id=${encodeURIComponent(it.id)}&kind=download` : ''),
       isDemoItem: false,
     }));
+
+    // V48：Project Workspace——AI Agent 透過 create_project／save_file 等工具真的
+    // 產出的檔案，也要在交付中心顯示與提供下載，這是這一版的核心要求：「交付中心
+    // 直接依 Workspace 顯示與下載」。一個專案可能有好幾個檔案，這裡攤平成「一個
+    // 檔案＝一列」，跟董事長自己上傳的項目用同樣的卡片格式呈現，用「🤖 AI Agent
+    // 產出」標籤區分來源；圖片／HTML／PDF 這類瀏覽器能直接開啟的檔案，「看 Demo」
+    // 也指向同一個下載連結（瀏覽器會自動用合適的方式開啟或下載）。
+    let workspaceItems = [];
+    try {
+      const wsRes = await fetch(`${base}/workspace-list`);
+      const wsData = await wsRes.json().catch(() => ({}));
+      const projects = Array.isArray(wsData.projects) ? wsData.projects : [];
+      workspaceItems = projects.flatMap(p => (p.files || []).map(f => {
+        const fileUrl = `${base}/workspace-file?projectId=${encodeURIComponent(p.id)}&filename=${encodeURIComponent(f.filename)}`;
+        const viewableInBrowser = /^(text\/html|image\/|application\/pdf)/.test(f.contentType || '');
+        const dept = ORG_REGISTRY.find(r => r.id === (p.createdBy && p.createdBy.deptId));
+        return {
+          id: `${p.id}::${f.filename}`,
+          title: `${p.title}・${f.filename}`,
+          desc: p.description || '',
+          contributors: dept ? [dept.id] : [],
+          badge: 'verified',
+          badgeLabel: '🤖 AI 產出',
+          version: '',
+          time: f.savedAt ? formatDeliveryTime(f.savedAt) : '',
+          demoUrl: viewableInBrowser ? fileUrl : '',
+          downloadUrl: fileUrl,
+          isDemoItem: false,
+          isWorkspaceItem: true,
+        };
+      }));
+    } catch (err) {
+      console.error('讀取專案工作區清單失敗（不影響董事長自己上傳的交付項目照常顯示）：', err);
+    }
+
+    const combinedRealItems = [...workspaceItems, ...realItems];
     // V41：存一份原始資料（含 hasDemo／hasDownload／真正的 demoUrl 欄位，不是
     // 組出來的代理網址），編輯表單需要分清楚「這個欄位原本是網址還是上傳的檔案」
     deliveryRealRecordsCache = {};
     (data.items || []).forEach(it => { deliveryRealRecordsCache[it.id] = it; });
     // V34：只要有任何一筆真實交付項目，就把 delivery-data.js 的示範卡片整個
     // 藏起來，不再兩者並列——呼應「所有寫死假資料的部分，只要有真實資料就隱藏」。
-    renderDelivery(realItems.length > 0 ? realItems : demoItems, ORG_REGISTRY);
+    // V48：這裡的「真實項目」現在包含兩種來源——董事長自己上傳的，跟 AI Agent
+    // 透過 Project Workspace 工具真的產出的，只要任一種有資料就不顯示示範內容。
+    renderDelivery(combinedRealItems.length > 0 ? combinedRealItems : demoItems, ORG_REGISTRY);
     if (status) {
-      status.textContent = realItems.length > 0
-        ? `已連上真實交付檔案儲存（Cloudflare R2）：${realItems.length} 筆真實交付項目，delivery-data.js 的示範內容已隱藏。`
-        : '已連上真實交付檔案儲存（Cloudflare R2），目前還沒有任何真實上傳過的項目，以下先顯示示範內容，可以用下方表單上傳第一筆。';
+      status.textContent = combinedRealItems.length > 0
+        ? `已連上真實交付檔案儲存（Cloudflare R2）：${realItems.length} 筆董事長上傳項目、${workspaceItems.length} 筆 AI Agent 產出檔案，delivery-data.js 的示範內容已隱藏。`
+        : '已連上真實交付檔案儲存（Cloudflare R2），目前還沒有任何真實項目，以下先顯示示範內容，可以用下方表單上傳第一筆，或請總經理委派任務讓 AI Agent 產出檔案。';
       status.classList.remove('is-error');
     }
     setDeliveryUploadEnabled(true);
@@ -1865,6 +1908,7 @@ if (taskGridEl) {
       await loadTaskState(); // 直接整個重新讀一次任務清單，確保畫面跟後端完全一致
       loadApprovalList(); // 取消任務可能連帶關閉一張待審批項目，這裡一併刷新
       loadBoardState(); // 推進下一步如果成功執行了步驟，部門看板也要跟著更新
+      loadDeliveryState(); // V48：AI Agent 這一步可能存了新檔案，重新整理交付中心
       loadAuditLog(); // V47：推進/取消都是治理事件，稽核紀錄也要跟著更新
       // V35：後端現在把接下來的步驟丟到背景執行（data.started 為 true），這裡
       // 剛讀回來的狀態可能還沒反映最新進度，上面已經開始的輪詢（每 6 秒）會
@@ -1906,6 +1950,7 @@ setInterval(() => {
     loadTaskState();
     loadApprovalList();
     loadBoardState();
+    loadDeliveryState(); // V48：AI Agent 這一步可能存了新檔案，重新整理交付中心
   }
 }, 6000);
 
@@ -2042,6 +2087,7 @@ if (approvalListEl) {
         }
         loadTaskState(); // 核准／退回可能讓任務往下推進了，重新整理任務中心
         loadBoardState(); // 核准的步驟如果真的執行了，部門看板也要跟著更新
+        loadDeliveryState(); // V48：AI Agent 這一步可能存了新檔案，重新整理交付中心
         loadApprovalHistory();
         loadAuditLog(); // V47：核准/退回/加問是核心治理事件，稽核紀錄要跟著更新
       } else if (note) {

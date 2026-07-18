@@ -953,6 +953,7 @@
   .delivery-sync-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
   .delivery-sync-status.is-error{color:var(--risk-high);}
   .delivery-demo-tag{margin-left:6px;}
+  .delivery-workspace-tag{margin-left:6px; background:rgba(90,90,220,.12); color:var(--violet); border-color:transparent;}
 
   .delivery-upload-panel{margin-top:18px; border-top:1px dashed var(--line-strong); padding-top:16px;}
   .delivery-upload-panel summary{

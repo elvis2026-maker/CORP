@@ -1595,6 +1595,15 @@ function buildTaskCardHtml(task) {
   const advanceHint = isAwaitingApproval
     ? `<span class="tc-action-hint">請到上方「待您核准」裁示 →</span>`
     : '';
+  // V49：董事長回報「任務一直卡在規劃中、按推進下一步也沒反應」——查證後是背景
+  // 執行真的失敗了，但失敗原因以前只寫進 Cloudflare Logs，畫面上完全看不到，
+  // 感覺起來就像按了沒反應。這裡把 task.lastError（後端這次新增的欄位，見
+  // cloudflare-worker.js runTaskStepsFrom 的 V49 說明）顯示出來，失敗原因會
+  // 直接寫在任務卡片上，不會再悄悄消失。步驟真的成功一次之後，lastError 會被
+  // 後端清空，這個提示框也會跟著自動消失。
+  const lastErrorHtml = (task.lastError && !isTerminal)
+    ? `<p class="tc-last-error">⚠ 上一次執行失敗（${escapeBoardText(task.lastError.deptName || '')}）：${escapeBoardText(task.lastError.message)}——可能是 API 金鑰未設定／額度用完，或暫時性錯誤，可以按「推進下一步」重試，仍反覆失敗請查 Cloudflare Worker 的 Real-time Logs 確認真正原因</p>`
+    : '';
   return `
       <details class="task-card" data-task-id="${task.id}" data-status="${task.status}">
         <summary>
@@ -1611,6 +1620,7 @@ function buildTaskCardHtml(task) {
           </div>
           <div class="tc-meta"><span>${doneCount}/${total} 步驟完成</span><span>${estimatedText}${estimatedText ? ' · ' : ''}建立於 ${formatTaskTime(task.createdAt)}</span></div>
         </summary>
+        ${lastErrorHtml}
         <div class="tc-steps">${task.steps.map(buildTaskStepHtml).join('')}</div>
         <div class="tc-workflow-editor" id="wf-editor-${task.id}" hidden></div>
         <div class="tc-actions">

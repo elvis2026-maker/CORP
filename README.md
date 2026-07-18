@@ -1,9 +1,24 @@
-# ELVIS-CORP-V48
+# ELVIS-CORP-V49
 
-艾維斯萬能事務所 · 董事長指揮中心 — V48
+艾維斯萬能事務所 · 董事長指揮中心 — V49
 
 ## 版次紀錄
 
+### V49.0 — 2026.07.18
+董事長回報：V48 改完之後，交辦的任務（截圖裡看到的 16 筆）全部卡在「規劃中」、0% 進度，就算手動按「推進下一步」也「沒反應」。
+
+**查出來的真正原因：不是「沒反應」，是每一步都真的執行失敗了，只是失敗原因以前完全不會顯示在畫面上。** 用實際情境重現（只設定 `GM_GEMINI_API_KEY`、刻意不設定 `DEP_GEMINI_API_KEY`／`DEP2_GEMINI_API_KEY`／`ELVIS_CORP_KEY` 這組「部門專用」的金鑰鏈）之後，100% 重現了截圖裡的現象：總經理主對話用的是 `GM` 金鑰鏈，聊天、建立任務都正常，所以董事長看得到 16 筆任務被建立出來；但每一個任務步驟實際執行時，走的是完全獨立的 `DEP` 金鑰鏈（V29 就分成兩條互相獨立的鏈，見程式碼裡的說明），這條鏈如果沒設定，`runSubtask` 會直接拋出「沒有可用的 Gemini API 金鑰」，`runTaskStepsFrom` 接住這個例外後，把任務狀態退回「規劃中」——**但退回去的原因，以前只寫進 Cloudflare 後台的 Real-time Logs，董事長在網頁上完全看不到，體感上就是「按了推進下一步，畫面完全沒變化」**，不管按幾次、等多久都一樣，因為背景一直重複發生同一件事：試著執行 → 立刻因為缺金鑰失敗 → 悄悄退回規劃中 → 董事長什麼提示都看不到。
+
+**這一版做的修正，分兩層：**
+
+1. **把失敗原因從「只留在後端 Log」改成「直接寫進任務紀錄、顯示在任務卡片上」。** `runTaskStepsFrom`（任務自動推進的主迴圈）跟 `handleApprovalDecide`（核准任務步驟後的執行路徑）兩處原本 catch 到錯誤後只做 `console.error()` 的地方，現在都會把錯誤訊息存進 `task.lastError`（含是哪個部門、什麼錯誤訊息、什麼時候發生）跟對應 `step.lastError`，並且在下一次真的執行成功時自動清空。前端任務卡片新增一個紅色提示框，只要 `task.lastError` 有內容就會直接顯示出來，內容包含具體的錯誤訊息（例如「沒有可用的 Gemini API 金鑰（DEP_GEMINI_API_KEY、DEP2_GEMINI_API_KEY、ELVIS_CORP_KEY 都沒有設定）」），並提示可能原因與下一步該怎麼做。這樣不管真正的原因是什麼（金鑰沒設定、金鑰額度用完、撞到成本停損、Gemini 那邊暫時性錯誤……），董事長下次再遇到「怎麼都不動」，畫面上就會直接告訴您為什麼，不用再靠我們事後重現才查得出來。
+2. **董事長這邊很可能需要動手做的事：去 Cloudflare Worker 的 Settings → Variables and Secrets 確認有沒有設定 `DEP_GEMINI_API_KEY`（部門委派子任務專用的金鑰，跟總經理聊天用的 `GM_GEMINI_API_KEY` 是兩把不同的金鑰，V29 就分開了，很容易只設定了一邊）。** 這是目前重現出來機率最高的原因，但誠實說清楚：我這邊沒有辦法連上您真實的 Cloudflare 帳號、看不到您實際設定了哪些 Secrets，上面是「用最貼近截圖症狀的情境重現，找到一個會 100% 重現這個症狀的原因」，不是「已經확認就是這個原因」。部署這一版之後，如果任務卡片上出現的錯誤訊息不是「沒有可用的 Gemini API 金鑰」，而是別的訊息（例如停損上限、Gemini 回傳的其他錯誤），請直接把卡片上顯示的文字截圖給我，就能知道下一步要修什麼。
+
+**驗證方式：** 寫了 2 支 Node.js 測試，直接重現「DEP 金鑰鏈沒設定」這個情境，確認：任務會如實停在 planning、步驟保持 pending（可重試，不會卡死）、`task.lastError`／`step.lastError` 確實被寫入且內容正確；再驗證設定好金鑰、下次真的執行成功後，`lastError` 會自動清空、任務正常推進到 done。2 支測試全部通過。
+
+**這次沒有動到、也確認過沒有問題的部分：** 金鑰解析（`resolveApiKeys`）、逾時與重試機制（`fetchWithTimeout`／`callGeminiWithFallback`）、V48 新增的 Project Workspace 多輪 Function Calling 迴圈、前端的輪詢機制（`taskPollingShouldRun`）——這幾處都逐一檢查過程式邏輯本身沒有問題，問題確實只在「失敗了，但沒有把原因告訴董事長」這一點上。
+
+---
 ### V48.0 — 2026.07.18
 這一版是董事長主動提出的新架構：**建立 Project Workspace，提供 Function Calling Tool（`create_project`、`save_file`、`save_pdf`、`save_image`、`save_zip`、`list_workspace`），所有 AI Agent 的產出必須透過 Tool 寫入 SQLite 與 R2，交付中心直接依 Workspace 顯示與下載**。
 

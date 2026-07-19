@@ -110,6 +110,13 @@ function workspaceFileIcon(contentType) {
   if (ct.startsWith('text/html')) return '🌐';
   return '📄';
 }
+// V53：董事長回報交付中心的「AI Agent 專案工作區」越拉越長——這裡改成預設只顯示
+// 最新的 5 個專案，其餘收在「顯示更多」按鈕後面（跟稽核日誌 V47 起「展開全部」
+// 的收合模式是同一套使用者體驗，這個專案裡收合列表一律用同一種互動方式，不要
+// 每個地方各自發明一套）。workspaceProjectsExpanded 是模組層級變數，記住「這次
+// 頁面停留期間」有沒有展開過，重新整理頁面會回到預設收合狀態。
+let workspaceProjectsExpanded = false;
+const WORKSPACE_PROJECTS_COLLAPSED_COUNT = 5;
 function renderWorkspaceProjects(projects, orgRegistry, base) {
   const container = document.getElementById('workspaceProjects');
   if (!container) return;
@@ -117,7 +124,9 @@ function renderWorkspaceProjects(projects, orgRegistry, base) {
     container.innerHTML = '';
     return;
   }
-  container.innerHTML = projects.map(p => {
+  const sorted = [...projects].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : (a.updatedAt > b.updatedAt ? -1 : 0)));
+  const visible = workspaceProjectsExpanded ? sorted : sorted.slice(0, WORKSPACE_PROJECTS_COLLAPSED_COUNT);
+  const cardsHtml = visible.map(p => {
     const dept = orgRegistry.find(r => r.id === (p.createdBy && p.createdBy.deptId));
     const contributorHtml = dept
       ? `<span class="ava ${dept.avaClass} dlist-dept-ava" aria-hidden="true" title="${escapeBoardText(dept.name)}"><span class="ava-glyph">${dept.glyph}</span></span>`
@@ -133,7 +142,7 @@ function renderWorkspaceProjects(projects, orgRegistry, base) {
               <span class="workspace-file-size">${formatFileSize(f.size)}</span>
             </a>`;
         }).join('')
-      : `<p class="workspace-project-empty">這個專案還沒有存進任何檔案。</p>`;
+      : `<p class="workspace-project-empty">這個專案還沒有存進任何檔案，可能是 AI Agent 只建立了專案但還沒真的存檔——沒用的話可以按右上角刪除。</p>`;
     return `
       <div class="workspace-project-card">
         <div class="workspace-project-head">
@@ -146,12 +155,51 @@ function renderWorkspaceProjects(projects, orgRegistry, base) {
             ${contributorHtml}
             <span>${files.length} 個檔案</span>
             <span>${p.updatedAt ? formatDeliveryTime(p.updatedAt) : ''}</span>
+            <button type="button" class="workspace-project-delete" data-project-delete="${p.id}" title="刪除這個專案（連同底下所有檔案）">🗑</button>
           </div>
         </div>
         <div class="workspace-project-files">${filesHtml}</div>
       </div>`;
   }).join('\n');
+  const toggleHtml = sorted.length > WORKSPACE_PROJECTS_COLLAPSED_COUNT
+    ? `<button type="button" class="workspace-projects-toggle" id="workspaceProjectsToggle">${workspaceProjectsExpanded ? '收合，只顯示最新 5 個' : `顯示更多（還有 ${sorted.length - WORKSPACE_PROJECTS_COLLAPSED_COUNT} 個專案）`}</button>`
+    : '';
+  container.innerHTML = cardsHtml + toggleHtml;
 }
+document.addEventListener('click', async (e) => {
+  const toggleBtn = e.target.closest('#workspaceProjectsToggle');
+  if (toggleBtn) {
+    workspaceProjectsExpanded = !workspaceProjectsExpanded;
+    loadDeliveryState(); // 重新整理才能重新套用收合／展開狀態，跟稽核日誌的作法一致
+    return;
+  }
+  const deleteBtn = e.target.closest('[data-project-delete]');
+  if (deleteBtn) {
+    const projectId = deleteBtn.getAttribute('data-project-delete');
+    const card = deleteBtn.closest('.workspace-project-card');
+    const titleEl = card?.querySelector('.workspace-project-title');
+    const titleText = titleEl ? titleEl.textContent.replace('🤖 AI Agent 產出', '').trim() : projectId;
+    if (!confirm(`確定要刪除專案「${titleText}」嗎？這個專案底下所有已經存的檔案也會一併從 R2 刪除，無法復原。`)) return;
+    const base = apiBase();
+    if (!base) return;
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = '…';
+    try {
+      const res = await fetch(`${base}/project-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+        body: JSON.stringify({ projectId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      await loadDeliveryState();
+    } catch (err) {
+      alert(`刪除失敗：${err.message || err}`);
+      deleteBtn.disabled = false;
+      deleteBtn.textContent = '🗑';
+    }
+  }
+});
 
 function renderDelivery(items, orgRegistry) {
   const container = document.getElementById('deliveryGrid');

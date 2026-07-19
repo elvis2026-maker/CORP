@@ -985,6 +985,17 @@
   .workspace-file-name{flex:1 1 auto; min-width:0; font-size:12px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
   .workspace-file-size{flex:none; font-size:10.5px; color:var(--ink-faint);}
   .workspace-project-empty{padding:10px 16px; font-size:11.5px; color:var(--ink-faint);}
+  .workspace-project-delete{
+    flex:none; border:1px solid var(--line); background:#fff; border-radius:8px; width:24px; height:24px;
+    font-size:12px; cursor:pointer; color:var(--ink-faint); line-height:1; transition:all .12s ease;
+  }
+  .workspace-project-delete:hover{color:var(--risk-high); border-color:var(--risk-high);}
+  .workspace-project-delete:disabled{opacity:.5; cursor:default;}
+  .workspace-projects-toggle{
+    display:block; width:100%; margin-top:8px; padding:9px; border:1px dashed var(--line); border-radius:10px;
+    background:#fff; color:var(--ink-soft); font-size:12px; cursor:pointer; transition:background .12s ease;
+  }
+  .workspace-projects-toggle:hover{background:var(--card);}
   @media (max-width:640px){
     .workspace-project-head{flex-wrap:wrap;}
     .workspace-project-meta{flex:1 0 100%; margin-top:4px;}

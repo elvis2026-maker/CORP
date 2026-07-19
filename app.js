@@ -90,6 +90,69 @@ function renderOrg(registry) {
 // 「示範內容」。跟 V23 部門看板的「示範內容」小標籤是同一個精神：真實項目
 // 不會有這個標籤，示範內容的卡片右下角會誠實標出來，不讓董事長誤以為那些
 // 也是真的已經完成的案子。
+// V51：AI Agent 透過 Project Workspace 產出的檔案，改成「一個專案一張卡片」——
+// 原本 V48 是把每個專案裡的每個檔案拆開，攤平混進跟董事長自己上傳項目同一份
+// 清單（renderDelivery），一個有 3 個檔案的專案看起來就像 3 筆互不相干的
+// 交付項目，讓人搞不清楚這些檔案其實是同一個任務、同一個專案產出的。這裡
+// 改成專案本身是一張卡片，裡面才是這個專案目前有的檔案清單，符合「Project
+// Workspace」原本的精神：一個容器，裝著這次任務交付的所有檔案。
+function formatFileSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+function workspaceFileIcon(contentType) {
+  const ct = String(contentType || '');
+  if (ct.startsWith('image/')) return '🖼️';
+  if (ct === 'application/pdf') return '📕';
+  if (ct === 'application/zip') return '🗜️';
+  if (ct.startsWith('text/html')) return '🌐';
+  return '📄';
+}
+function renderWorkspaceProjects(projects, orgRegistry, base) {
+  const container = document.getElementById('workspaceProjects');
+  if (!container) return;
+  if (!projects.length) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = projects.map(p => {
+    const dept = orgRegistry.find(r => r.id === (p.createdBy && p.createdBy.deptId));
+    const contributorHtml = dept
+      ? `<span class="ava ${dept.avaClass} dlist-dept-ava" aria-hidden="true" title="${escapeBoardText(dept.name)}"><span class="ava-glyph">${dept.glyph}</span></span>`
+      : '';
+    const files = Array.isArray(p.files) ? p.files : [];
+    const filesHtml = files.length
+      ? files.map(f => {
+          const fileUrl = `${base}/workspace-file?projectId=${encodeURIComponent(p.id)}&filename=${encodeURIComponent(f.filename)}`;
+          return `
+            <a class="workspace-file-row" href="${fileUrl}" target="_blank" rel="noopener noreferrer" download="${escapeBoardText(f.filename)}">
+              <span class="workspace-file-icon" aria-hidden="true">${workspaceFileIcon(f.contentType)}</span>
+              <span class="workspace-file-name">${escapeBoardText(f.filename)}</span>
+              <span class="workspace-file-size">${formatFileSize(f.size)}</span>
+            </a>`;
+        }).join('')
+      : `<p class="workspace-project-empty">這個專案還沒有存進任何檔案。</p>`;
+    return `
+      <div class="workspace-project-card">
+        <div class="workspace-project-head">
+          <span class="workspace-project-icon" aria-hidden="true">🗂️</span>
+          <div class="workspace-project-main">
+            <p class="workspace-project-title">${escapeBoardText(p.title)} <i class="bc-demo-tag delivery-workspace-tag">🤖 AI Agent 產出</i></p>
+            <p class="workspace-project-desc">${escapeBoardText(p.description || '')}</p>
+          </div>
+          <div class="workspace-project-meta">
+            ${contributorHtml}
+            <span>${files.length} 個檔案</span>
+            <span>${p.updatedAt ? formatDeliveryTime(p.updatedAt) : ''}</span>
+          </div>
+        </div>
+        <div class="workspace-project-files">${filesHtml}</div>
+      </div>`;
+  }).join('\n');
+}
+
 function renderDelivery(items, orgRegistry) {
   const container = document.getElementById('deliveryGrid');
   if (!container) return;
@@ -1183,6 +1246,7 @@ async function loadDeliveryState() {
       status.classList.add('is-error');
     }
     renderDelivery(demoItems, ORG_REGISTRY);
+    renderWorkspaceProjects([], ORG_REGISTRY, base);
     setDeliveryUploadEnabled(false, '尚未設定 Worker 網址');
     return;
   }
@@ -1196,6 +1260,7 @@ async function loadDeliveryState() {
         status.classList.add('is-error');
       }
       renderDelivery(demoItems, ORG_REGISTRY);
+      renderWorkspaceProjects([], ORG_REGISTRY, base);
       setDeliveryUploadEnabled(false, 'APPROVALS_KV 尚未綁定完成');
       return;
     }
@@ -1217,39 +1282,23 @@ async function loadDeliveryState() {
 
     // V48：Project Workspace——AI Agent 透過 create_project／save_file 等工具真的
     // 產出的檔案，也要在交付中心顯示與提供下載，這是這一版的核心要求：「交付中心
-    // 直接依 Workspace 顯示與下載」。一個專案可能有好幾個檔案，這裡攤平成「一個
-    // 檔案＝一列」，跟董事長自己上傳的項目用同樣的卡片格式呈現，用「🤖 AI Agent
-    // 產出」標籤區分來源；圖片／HTML／PDF 這類瀏覽器能直接開啟的檔案，「看 Demo」
-    // 也指向同一個下載連結（瀏覽器會自動用合適的方式開啟或下載）。
-    let workspaceItems = [];
+    // 直接依 Workspace 顯示與下載」。
+    // V51：修正——原本這裡把每個專案的每個檔案攤平成獨立一列跟 delivery-item
+    // 混在一起顯示，導致一個專案的好幾個檔案看起來像互不相干的產出。現在改成
+    // 呼叫 renderWorkspaceProjects() 用「一個專案一張卡片」的方式獨立顯示，
+    // 不再混進 combinedRealItems 這份給 renderDelivery() 用的清單。
+    let workspaceProjects = [];
     try {
       const wsRes = await fetch(`${base}/workspace-list`);
       const wsData = await wsRes.json().catch(() => ({}));
-      const projects = Array.isArray(wsData.projects) ? wsData.projects : [];
-      workspaceItems = projects.flatMap(p => (p.files || []).map(f => {
-        const fileUrl = `${base}/workspace-file?projectId=${encodeURIComponent(p.id)}&filename=${encodeURIComponent(f.filename)}`;
-        const viewableInBrowser = /^(text\/html|image\/|application\/pdf)/.test(f.contentType || '');
-        const dept = ORG_REGISTRY.find(r => r.id === (p.createdBy && p.createdBy.deptId));
-        return {
-          id: `${p.id}::${f.filename}`,
-          title: `${p.title}・${f.filename}`,
-          desc: p.description || '',
-          contributors: dept ? [dept.id] : [],
-          badge: 'verified',
-          badgeLabel: '🤖 AI 產出',
-          version: '',
-          time: f.savedAt ? formatDeliveryTime(f.savedAt) : '',
-          demoUrl: viewableInBrowser ? fileUrl : '',
-          downloadUrl: fileUrl,
-          isDemoItem: false,
-          isWorkspaceItem: true,
-        };
-      }));
+      workspaceProjects = Array.isArray(wsData.projects) ? wsData.projects : [];
     } catch (err) {
       console.error('讀取專案工作區清單失敗（不影響董事長自己上傳的交付項目照常顯示）：', err);
     }
+    renderWorkspaceProjects(workspaceProjects, ORG_REGISTRY, base);
+    const workspaceFileCount = workspaceProjects.reduce((sum, p) => sum + (Array.isArray(p.files) ? p.files.length : 0), 0);
 
-    const combinedRealItems = [...workspaceItems, ...realItems];
+    const combinedRealItems = realItems;
     // V41：存一份原始資料（含 hasDemo／hasDownload／真正的 demoUrl 欄位，不是
     // 組出來的代理網址），編輯表單需要分清楚「這個欄位原本是網址還是上傳的檔案」
     deliveryRealRecordsCache = {};
@@ -1258,10 +1307,11 @@ async function loadDeliveryState() {
     // 藏起來，不再兩者並列——呼應「所有寫死假資料的部分，只要有真實資料就隱藏」。
     // V48：這裡的「真實項目」現在包含兩種來源——董事長自己上傳的，跟 AI Agent
     // 透過 Project Workspace 工具真的產出的，只要任一種有資料就不顯示示範內容。
-    renderDelivery(combinedRealItems.length > 0 ? combinedRealItems : demoItems, ORG_REGISTRY);
+    const hasAnyRealContent = combinedRealItems.length > 0 || workspaceProjects.length > 0;
+    renderDelivery(hasAnyRealContent ? combinedRealItems : demoItems, ORG_REGISTRY);
     if (status) {
-      status.textContent = combinedRealItems.length > 0
-        ? `已連上真實交付檔案儲存（Cloudflare R2）：${realItems.length} 筆董事長上傳項目、${workspaceItems.length} 筆 AI Agent 產出檔案，delivery-data.js 的示範內容已隱藏。`
+      status.textContent = hasAnyRealContent
+        ? `已連上真實交付檔案儲存（Cloudflare R2）：${realItems.length} 筆董事長上傳項目、${workspaceProjects.length} 個 AI Agent 專案工作區（共 ${workspaceFileCount} 個檔案），delivery-data.js 的示範內容已隱藏。`
         : '已連上真實交付檔案儲存（Cloudflare R2），目前還沒有任何真實項目，以下先顯示示範內容，可以用下方表單上傳第一筆，或請總經理委派任務讓 AI Agent 產出檔案。';
       status.classList.remove('is-error');
     }
@@ -1273,6 +1323,7 @@ async function loadDeliveryState() {
       status.classList.add('is-error');
     }
     renderDelivery(demoItems, ORG_REGISTRY);
+    renderWorkspaceProjects([], ORG_REGISTRY, base);
     setDeliveryUploadEnabled(false, '連不上後端服務');
   }
 }

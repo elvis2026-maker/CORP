@@ -255,6 +255,13 @@
 
       <div class="ws-block" id="delivery">
         <p class="ws-block-title">交付中心・已完成的成品與 Demo <span class="ws-block-note">可以直接點連結看 Demo，也可以下載完整檔案包</span></p>
+
+        <!-- V51：AI Agent 透過 Project Workspace 產出的檔案，改成「一個專案一張卡片、
+             裡面列出這個專案的所有檔案」，不再把每個檔案拆成各自獨立的一列——
+             呼應「交付中心直接依 Workspace 顯示」這個專案本來的精神，不是把
+             Workspace 的檔案打散變成看起來跟其他檔案互不相干的東西。 -->
+        <div class="workspace-projects" id="workspaceProjects"></div>
+
         <div class="delivery-list" id="deliveryGrid"></div>
         <p class="delivery-sync-status" id="deliverySyncStatus">載入中…</p>
 
@@ -422,7 +429,7 @@
 
   <footer class="site-footer">
     <div class="plate">Elvis 程式設計 <span>· 艾維斯資訊 IT 顧問</span></div>
-    <div class="meta"><span>V50.0</span><span>2026.07.18</span></div>
+    <div class="meta"><span>V51.0</span><span>2026.07.19</span></div>
   </footer>
 
   <!-- shared gradient definition -->

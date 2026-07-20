@@ -1,9 +1,23 @@
-# ELVIS-CORP-V53
+# ELVIS-CORP-V54
 
-艾維斯萬能事務所 · 董事長指揮中心 — V53
+艾維斯萬能事務所 · 董事長指揮中心 — V54
 
 ## 版次紀錄
 
+### V54.0 — 2026.07.20
+接續 V53：save_image 到 V53 為止還是「要求語言模型自己生出圖片位元組（base64）」這條路——工具說明裡老實講清楚了「這極不可靠，幾乎不可能生出打得開的圖片」，代價是角色一直被引導改用 HTML／SVG 代替，公司實際上做不出真正的圖片這種交付物。這一版是董事長指定的「建置生圖 → 串接 Pollinations AI」，只改 `cloudflare-worker.js` 一個檔案，前端（`index.html`／`app.js`／`styles.css`）、其餘工具（save_pdf／save_zip／save_file／create_project／list_workspace）、Wrangler 設定、KV／R2 綁定方式全部不動，不需要重新部署 Cloudflare Pages 或調整任何綁定。
+
+**save_image 改成真的呼叫 Pollinations AI，存進 R2**
+- 新增 `generateImageWithPollinations()`：角色只要在 `save_image` 的 `prompt` 欄位填一段圖片描述（建議英文），Worker 就會實際發 GET 請求打 `image.pollinations.ai/prompt/<描述>`（不需要 API Key、免費公開服務，可選填 `width`／`height`，預設 1024×1024、上限 2048），把服務回傳的真實圖片位元組（連同它回的 `Content-Type`）直接寫進 R2——不再是語言模型自己「編」出來、打不開的假圖片
+- `save_image` 的實作獨立成新的 `toolSaveImage()`，不再共用 `toolSaveFile()` 的舊路徑；為了不切斷既有流程，`base64Content` 備援路徑保留（角色如果已經有現成合法的圖片位元組，還是可以直接存），但工具說明與角色 prompt 都已經明確引導「優先用 prompt」
+- 失敗處理：呼叫服務失敗、逾時、或回傳內容小到不像正常圖片（小於 256 bytes）都會回傳清楚的錯誤訊息，並建議角色換個 prompt 重試，或退回 `save_file` 存一份 HTML／SVG 作為替代方案，不會讓一次失敗的外部呼叫變成整個任務卡死
+- 角色 prompt（`runSubtask` 裡送給部門角色的檔案格式規則）同步更新：`save_image` 從「跟 save_pdf／save_zip 一樣不可靠」的警語，改成「V54 起真的會生圖，需要視覺素材時可以放心呼叫」；`save_pdf`／`save_zip` 目前仍然沒有串接真實生成服務，維持原本的保守警語
+
+**驗證方式與已知限制：** 這個沙箱環境沒有對外網路存取權限，無法在部署前實際打一次 `image.pollinations.ai` 驗證回應內容，程式碼邏輯已經過 Node.js 語法檢查（`node --check`）確認沒有語法錯誤，但**沒有辦法驗證「Pollinations API 在正式環境的可用性、延遲與圖片品質」**——這部分需要部署後董事長實際觀察部門角色呼叫 `save_image` 的產出，如果發現生圖常常失敗、逾時，或畫質不符期待，麻煩告訴我，屆時可以再調整重試邏輯、換一個生圖服務，或加上更保守的錯誤重試次數。
+
+**【您要做的事】** 把新的 `cloudflare-worker.js` 貼到 Cloudflare Worker 編輯器重新部署即可。`index.html` 這次只同步更新了頁尾版本標示（V54.0／2026.07.20），沒有其他改動；`app.js`、`styles.css`、`org-data.js`、`config.js`、`delivery-data.js`、`wrangler.jsonc` 完全沒有變動。KV／R2 綁定方式也維持原樣，`save_image` 呼叫 Pollinations AI 走的是 Worker 對外的 `fetch()`，不需要額外設定 API Key 或新的環境變數。
+
+---
 ### V53.0 — 2026.07.19
 董事長回報三個問題（附截圖）：① Cloudflare Worker 線上編輯器出現 12 個 TypeScript 警告；② 交付中心裡有專案顯示「0 個檔案」，同一個任務的產出又散落成好幾個獨立專案；③ 交付中心的「AI Agent 專案工作區」清單越拉越長，需要能收合、能刪除沒用的專案。這一版把三個都處理了。
 

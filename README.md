@@ -1,9 +1,34 @@
-# ELVIS-CORP-V57
+# ELVIS-CORP-V58
 
-艾維斯萬能事務所 · 董事長指揮中心 — V57
+艾維斯萬能事務所 · 董事長指揮中心 — V58
 
 ## 版次紀錄
 
+### V58.0 — 2026.07.20
+接續 V57：董事長要求「建置 AI Tool Router（真正完成 AI 公司）」，具體是五件事：Tool Registry（工具清單）、Tool Dispatcher（工具調度）、Tool Result Aggregator（結果彙整）、Tool Error Retry（失敗重試）、Tool Permission（工具權限）。這五件事到 V57 為止其實都不存在，是分開的——每個工具自己一支函式、`executeWorkspaceTool()` 用一個 switch-case 手動接起來、有沒有重試看各自函式自己有沒有處理、任何部門都能呼叫任何工具（沒有權限機制）。這一版把這些收攏成一個真正的 Tool Router，只改 `cloudflare-worker.js` 一個檔案，前端與其他檔案不動。
+
+**Tool Registry（工具清單）**
+- 新增 `TOOL_REGISTRY`：`create_project`／`save_file`／`save_pdf`／`save_image`／`save_zip`／`list_workspace` 六個工具的 function-calling 宣告、實際處理函式、是否可重試、重試上限，全部集中定義在這一個表——這是單一事實來源，之後要調整某個工具的重試策略，只需要改這裡的一個數字。
+
+**Tool Dispatcher（工具調度）**
+- 新增 `dispatchTool()`，取代原本 `executeWorkspaceTool()` 的 switch-case：從 Registry 查出對應工具、先做 Tool Permission 檢查、再交給 Tool Error Retry 的邏輯執行。`runSubtask()` 的多輪對話迴圈改叫這支函式。
+
+**Tool Error Retry（失敗重試）**
+- 這是這次改動裡工程量最大的部分：把 `toolCreateProject`／`toolSaveFile`／`toolSaveImage`／`toolSaveZip` 內部「KV／R2 這類外部儲存服務失敗」「呼叫 Pollinations 圖片生成服務失敗」這幾種**暫時性**失敗，從原本的 `return { error: ... }` 改成 `throw new TransientToolError(...)`——差別很重要：V57 為止，「缺 projectId 這種打死都不會變的驗證失敗」跟「R2 剛好抖動一下的暫時性失敗」，回傳的都是長得一模一樣的 `{ error }` 物件，沒有任何機制可以分辨兩者、也就沒辦法只重試真正值得重試的那一種。這次讓 `dispatchTool()` 能分辨：只有 `TransientToolError` 會觸發重試（指數退避，300ms、600ms……），驗證性失敗直接判定為終局結果，不浪費 API 額度重試注定失敗的請求。`save_image`／`save_file` 重試 2 次，`create_project`／`save_pdf`／`save_zip` 重試 1 次，`list_workspace` 本身已經有內部容錯（KV 出錯會回傳空清單而不是拋錯），不需要重試。
+
+**Tool Permission（工具權限）**
+- 新增 `DEPT_TOOL_OVERRIDES` 設定表＋`checkToolPermission()`／`getAllowedToolsForDept()` 兩支函式：`dispatchTool()` 執行工具前會先檢查權限，`runSubtask()` 組 prompt 前也會先用權限表過濾要交給 Gemini 的工具清單——不只是「執行時擋掉」，而是「一開始就不讓模型看到它不該用的工具」，雙重保險。**這次的預設值是空表，也就是每個部門都能用全部六個工具，跟 V48 以來的實際行為完全一樣**——這是刻意的：先把「權限真的會被檢查、真的能生效」的機制建好，不因為新增這個機制就突然擋掉任何部門原本用得到的工具。之後董事長想限制某個部門（例如業務部不能用 `save_zip`），只需要在 `DEPT_TOOL_OVERRIDES` 裡加一筆 `{ deny: ['save_zip'] }`，不需要再改任何執行邏輯。
+
+**Tool Result Aggregator（結果彙整）**
+- 新增 `ToolCallAggregator`：`runSubtask()` 的多輪迴圈裡，每一次工具呼叫（哪個工具、成功還是失敗、重試了幾次、花了多久）都記一筆，子任務結束時彙整成一行摘要（例如「共呼叫 3 次工具，成功 3、失敗 0，共重試 1 次，總耗時 842ms：create_project✓、save_image✓(重試1次)、record_deliverable✓」），寫進審計日誌（`writeAuditLog`，action 是新的 `tool_router.summary`），也印一份到 Cloudflare Logs——董事長不用再自己爬散落的個別工具日誌兜結論，一筆就看到這個子任務整體的工具使用狀況。沒有呼叫過任何工具的子任務（模型第一輪就直接收尾）不會寫這筆，避免日誌灌水。
+
+**老實說清楚沒有涵蓋的部分：** Gemini 內建工具（`codeExecution`／`googleSearch`，見 `runAgentTool()`／`DEPT_TOOL_MODE`）**不在這次 Tool Router 的範圍內**——那是 Gemini API 原生支援的工具類型，執行方式是 Gemini 自己內部處理，我們拿不到「執行中」的過程，沒有可以插手重試、記錄、或做權限檢查的縫隙，技術上就是接不進 `dispatchTool()` 這一層。這次的 Tool Router 涵蓋的是我們自己定義、自己執行的六個 Project Workspace 工具，這是老實的技術限制，不是漏做。
+
+**驗證方式：** 這次改動涉及真正的控制流程（重試迴圈、權限判斷、例外分類），不只是文字調整，所以額外寫了一份獨立的邏輯測試（用假的 handler 模擬「前兩次暫時性失敗、第三次成功」「一直失敗、超過上限後放棄」「驗證失敗不重試」「一般例外不重試」「權限不足直接擋下」「未知工具名稱」「Aggregator 彙整數字」七種情境，共 20 項斷言），全部通過，確認重試次數、要不要重試的判斷、彙整出來的數字都符合預期。另外也用 `node --check` 確認 `cloudflare-worker.js` 完整檔案沒有語法錯誤。**沒有辦法驗證的部分：** 這個沙箱環境無法真的部署一份 Cloudflare Worker、觸發一次真正的 R2 暫時性故障來看重試會不會確實發生，也沒辦法驗證 20 個部門角色的多輪 Function Calling 對話在正式環境跑起來，Tool Router 這層會不會意外拉長回應時間（重試加上指數退避，最壞情況下 `save_image` 失敗兩次要多等 300ms+600ms=900ms）——這部分需要部署後董事長實際觀察，如果覺得重試等待時間影響體感速度，麻煩告訴我，可以調整重試次數或退避時間。
+
+**【您要做的事】** 把新的 `cloudflare-worker.js` 貼到 Cloudflare Worker 編輯器重新部署即可，其餘檔案完全沒有變動。KV／R2 綁定方式維持原樣，這次改動全部是 Worker 內部的程式邏輯調整，不需要任何額外設定。
+
+---
 ### V57.0 — 2026.07.20
 您問「交付中心的產出都文不對題，是不是因為用比較低階的模型」，並要求把總經理換成「Gemini 免費版的 Pro 模型」。這次先老實查證這個問題本身，再動手改，結果跟原本的認知不太一樣，這裡完整說明。只改了 `cloudflare-worker.js` 一個檔案，前端跟其他檔案完全不動。
 

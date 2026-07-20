@@ -1,9 +1,24 @@
-# ELVIS-CORP-V55
+# ELVIS-CORP-V56
 
-艾維斯萬能事務所 · 董事長指揮中心 — V55
+艾維斯萬能事務所 · 董事長指揮中心 — V56
 
 ## 版次紀錄
 
+### V56.0 — 2026.07.20
+接續 V55：save_zip 到 V55 為止還是「要求語言模型自己生出 zip 位元組（base64）」這條路——工具說明裡老實講清楚了「這極不可靠，幾乎不可能生出打得開的壓縮檔」，角色一直被引導改用 save_file 分別存成幾份獨立檔案，公司實際上做不出真正的多檔案壓縮包這種交付物。這一版是董事長指定的「建置 ZIP → 手刻加入真正的 DEFLATE 壓縮」，只改 `cloudflare-worker.js` 一個檔案，前端與其他工具完全不動，也**沒有引入 JSZip 或任何第三方套件**，維持專案一直以來的零依賴原則。
+
+**save_zip 加入真正手刻的 DEFLATE 壓縮**
+- 新增一整套 PKZIP／DEFLATE 手刻實作：`crc32()`（IEEE 802.3 查表法）、`BitWriter`（處理 DEFLATE 位元級別輸出，區分一般欄位的 LSB-first 與 Huffman code 的 MSB-first）、`lz77Compress()`（3-byte hash chain 找重複片段，視窗 32KB）、`deflateFixedBlock()`／`deflateRaw()`（用 RFC1951 固定 Huffman code 表編碼成合法 DEFLATE bitstream）、`createZip()`（組出完整 local file header／central directory／EOCD 的 PKZIP 格式）
+- `save_zip` 的參數改成 `files`（`{ filename, content }` 的陣列，檔名＋文字內容），角色只需要負責生出正確的文字內容（HTML／CSV／程式碼……），真正的 CRC32 計算、LZ77 比對、Huffman 編碼、PKZIP 格式組裝全部由 Worker 處理——這是跟 V54 把 save_image 從「要求模型生成二進位」改成「Worker 自己去外部服務要圖」同一個思路：模型只做它做得到的事（生文字），Worker 做它做得到的事（打包壓縮），只是這裡沒有外部生成服務可用，得自己把 DEFLATE 演算法手刻出來
+- `save_zip` 的實作獨立成新的 `toolSaveZip()`，不再共用 `toolSaveFile()` 的舊路徑；`base64Content` 備援路徑保留，工具說明與角色 prompt 都已經明確引導「優先用 files」
+- 極端情況（內容極短、或本身已經是壓縮格式，DEFLATE 壓縮後反而變大）會照 PKZIP 規格自動退回 STORE（不壓縮）存放，這是真實壓縮工具也會做的事，不是偷懶
+- 角色 prompt（「選對檔案格式很重要」規則）與 `save_pdf` 的說明同步更新：`save_zip` 從「跟 save_pdf 一樣不可靠」的警語，改成「V56 起真的會打包，需要多檔案壓縮包時可以放心呼叫」；`save_pdf` 目前仍然是唯一沒有串接真實生成路徑的格式，維持原本的保守警語
+
+**驗證方式：** 這組 DEFLATE／ZIP 手刻實作在部署前用 Node.js 內建的 `zlib.inflateRawSync()` 對多種樣本（空字串、單一字元、重複字元、中文內容、5000 行純文字、20000 bytes 隨機二進位）做「壓縮→解壓縮→逐位元組比對」往返測試，並且組出一個含子資料夾的三檔案 zip，額外用系統內建的 `unzip` 指令實際解壓縮、逐位元組比對內容——這是跟真實解壓縮工具對過的合法 zip，不是憑空宣稱「應該可以打開」。這份測試驗證的是「DEFLATE／ZIP 位元組本身合法且可還原」，沒有辦法驗證「Gemini 收到新版 prompt 之後，會不會真的把 files 陣列填對」——這部分需要部署後董事長實際觀察部門角色呼叫 `save_zip` 的產出，如果發現打包出來的內容不對，麻煩告訴我，屆時可以再調整 prompt 用字或範例格式。
+
+**【您要做的事】** 把新的 `cloudflare-worker.js` 貼到 Cloudflare Worker 編輯器重新部署即可，其餘檔案（`index.html` 只同步更新頁尾版本標示、`app.js`、`styles.css`、`org-data.js`、`config.js`、`delivery-data.js`、`wrangler.jsonc`）這次沒有實質改動。KV／R2 綁定方式也維持原樣，這次改動全部是純 JavaScript 運算，不需要任何額外設定或外部服務。
+
+---
 ### V55.0 — 2026.07.20
 接續 V54：這一版是董事長指定的兩件事，都只改 `cloudflare-worker.js` 一個檔案，不動架構、不動前端、不動 KV／R2 綁定——① Mermaid 流程圖直接寫進交付的 HTML、用 CDN 引入 Mermaid.js 交給瀏覽器端渲染；② save_pdf／save_image 的工具說明更新，明確告知圖片生成已經是真的支援了。
 

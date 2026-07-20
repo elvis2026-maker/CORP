@@ -1,9 +1,26 @@
-# ELVIS-CORP-V54
+# ELVIS-CORP-V55
 
-艾維斯萬能事務所 · 董事長指揮中心 — V54
+艾維斯萬能事務所 · 董事長指揮中心 — V55
 
 ## 版次紀錄
 
+### V55.0 — 2026.07.20
+接續 V54：這一版是董事長指定的兩件事，都只改 `cloudflare-worker.js` 一個檔案，不動架構、不動前端、不動 KV／R2 綁定——① Mermaid 流程圖直接寫進交付的 HTML、用 CDN 引入 Mermaid.js 交給瀏覽器端渲染；② save_pdf／save_image 的工具說明更新，明確告知圖片生成已經是真的支援了。
+
+**① 流程圖：Mermaid 語法直接寫進 HTML，交給瀏覽器端渲染**
+- 不新增任何工具、不改 Function Calling 的參數結構，純粹是調整 `runSubtask()` 裡送給部門角色的 prompt：在「選對檔案格式很重要」清單裡新增一條規則——遇到流程圖／架構圖／時序圖這類「節點＋箭頭」的示意圖，比起手畫 SVG，更適合的做法是用 `save_file` 存一份 HTML，裡面用 `<pre class="mermaid">flowchart TD ...</pre>` 包住 Mermaid 語法，並在 `<head>` 或 `<body>` 結尾透過 CDN（`cdn.jsdelivr.net/npm/mermaid`）引入 `mermaid.min.js`、呼叫 `mermaid.initialize({startOnLoad:true})`
+- 瀏覽器打開這份 HTML 時，Mermaid.js 會在瀏覽器端自動把語法渲染成真正的流程圖／時序圖／甘特圖（prompt 裡也提到 `sequenceDiagram`、`classDiagram`、`gantt` 都支援），渲染運算完全交給瀏覽器，Worker 跟語言模型都不需要處理任何圖形邏輯，這也是為什麼「不用動架構」——`save_file` 存的仍然只是一份文字型 HTML 檔案，跟 V48 以來的資料流完全一樣
+- 比起純手畫 SVG，Mermaid 語法更適合表達「先做什麼、再做什麼、條件分支」這類流程邏輯，角色只需要寫出正確的 Mermaid 語法（節點、箭頭、條件），排版、佈局、箭頭走向這些細節全部交給 Mermaid.js 自動處理，角色不容易在座標計算上出錯
+
+**② save_pdf／save_image 工具說明更新：明確告知已支援真圖片生成**
+- `save_pdf` 的 function-calling 說明重寫，講清楚「跟 save_image 不同，PDF 目前沒有零依賴、免 API Key 的可靠生成服務可以串接」，並且明確引導遇到視覺呈現需求時改用 `save_file`＋Mermaid，或用 `save_image`（V54 起真的會生圖）取得一張真實圖片再嵌進 HTML——不再是 V53 以前那種「save_pdf／save_image 都不可靠」的籠統警語，把兩個工具的現況分開講清楚
+- `save_image` 的說明本身在 V54 就已經講明「V54 起這個工具會『真的生成一張圖片』」，這一版沒有再改字句，但角色 prompt 與 `save_pdf` 的說明都同步呼應這一點，確保不管角色是先看到哪一個工具的說明，都能一致地知道「圖片生成已經是真的支援了，PDF 還沒有」
+
+**驗證方式：** 這兩項改動都是 prompt 文字與工具說明字串的調整，不涉及新的執行邏輯或外部服務呼叫，已用 Node.js 的 `node --check` 確認 `cloudflare-worker.js` 沒有語法錯誤（尤其是 Mermaid 範例字串裡的換行字元，容易在字串拼接時漏加或多加反斜線，這次額外檢查過拼接後的最終字串確實包含真正的換行，不是字面上的 `\n` 兩個字元）。**沒有辦法驗證的部分：** 這個沙箱環境沒有瀏覽器，無法實際打開產出的 HTML 檔案驗證 Mermaid.js 真的渲染出圖，也沒辦法驗證 Gemini 收到新版 prompt 之後，會不會確實判斷「這個任務該用 Mermaid 而不是純 SVG」——這些需要部署後董事長實際觀察部門角色的產出，如果發現 Mermaid 語法有誤、CDN 載入失敗，或角色該用 Mermaid 卻沒用，麻煩告訴我，屆時可以再調整 prompt 用字或範例語法。
+
+**【您要做的事】** 把新的 `cloudflare-worker.js` 貼到 Cloudflare Worker 編輯器重新部署即可，其餘檔案（`index.html` 只同步更新頁尾版本標示、`app.js`、`styles.css`、`org-data.js`、`config.js`、`delivery-data.js`、`wrangler.jsonc`）這次沒有實質改動。KV／R2 綁定方式維持原樣，這次改動不需要任何額外設定。
+
+---
 ### V54.0 — 2026.07.20
 接續 V53：save_image 到 V53 為止還是「要求語言模型自己生出圖片位元組（base64）」這條路——工具說明裡老實講清楚了「這極不可靠，幾乎不可能生出打得開的圖片」，代價是角色一直被引導改用 HTML／SVG 代替，公司實際上做不出真正的圖片這種交付物。這一版是董事長指定的「建置生圖 → 串接 Pollinations AI」，只改 `cloudflare-worker.js` 一個檔案，前端（`index.html`／`app.js`／`styles.css`）、其餘工具（save_pdf／save_zip／save_file／create_project／list_workspace）、Wrangler 設定、KV／R2 綁定方式全部不動，不需要重新部署 Cloudflare Pages 或調整任何綁定。
 

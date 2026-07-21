@@ -822,6 +822,24 @@
   .approval-sync-status{margin-top:8px; font-size:11px; color:var(--ink-faint);}
   .approval-sync-status.is-error{color:var(--risk-high);}
   .approval-card .approval-tag.is-task-linked{color:var(--violet);}
+
+  /* V59：成果待審（deliverable_review）卡片的預覽區塊——HTML 用 iframe、
+     圖片用 <img>、其他類型退回成一個可點開的檔案連結。跟一般卡片共用
+     .approval-card 外框，只有卡片內容中段（原本純文字 .approval-summary
+     的位置）換成這裡的預覽區塊。 */
+  .approval-preview{margin-top:11px; display:flex; flex-direction:column; gap:10px;}
+  .approval-preview-block{border:1px solid var(--line); border-radius:var(--radius-sm, 8px); overflow:hidden;}
+  .approval-preview-label{
+    font-size:11.5px; color:var(--ink-faint); padding:7px 10px; margin:0;
+    background:var(--bg-soft, rgba(0,0,0,.02)); border-bottom:1px solid var(--line);
+  }
+  .approval-preview-frame{width:100%; height:280px; border:none; display:block; background:#fff;}
+  .approval-preview-image{width:100%; max-height:280px; object-fit:contain; display:block; background:var(--bg-soft, rgba(0,0,0,.02));}
+  .approval-preview-file-link{
+    display:flex; align-items:center; gap:6px; padding:12px 14px; font-size:13px;
+    color:var(--ink-soft); text-decoration:none; font-weight:600;
+  }
+  .approval-preview-file-link:hover{color:var(--gm);}
   .approval-ask-history{
     font-size:11.5px; color:var(--ink-faint); margin-top:8px; padding:7px 10px;
     background:var(--paper); border:1px solid var(--line); border-radius:8px;

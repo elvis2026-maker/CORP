@@ -854,30 +854,80 @@ function formatApprovalTime(iso) {
   if (!iso) return '';
   try { return new Date(iso).toLocaleString('zh-TW', { hour12: false }); } catch { return ''; }
 }
+// V59：成果待審（deliverable_review）卡片專用的預覽區塊——依檔案類型決定怎麼
+// 顯示：HTML 用 iframe 直接渲染（跟 Mermaid CDN 一樣，渲染工作交給瀏覽器）、
+// 圖片用 <img>、其他類型（PDF／zip／純文字……）沒辦法安全地直接嵌在頁面裡，
+// 顯示成一個可以點開的連結＋檔案圖示＋大小，至少讓董事長知道這是什麼檔案、
+// 可以先點開看過再核准，不是完全看不到東西就要做決定。
+function buildDeliverablePreviewHtml(item) {
+  const base = apiBase();
+  const files = Array.isArray(item.previewFiles) ? item.previewFiles : [];
+  if (!files.length) return '<p class="approval-summary">（這個成果沒有留下任何檔案）</p>';
+  const blocks = files.map(f => {
+    const fileUrl = `${base}/workspace-file?projectId=${encodeURIComponent(item.projectId)}&filename=${encodeURIComponent(f.filename)}`;
+    const ct = String(f.contentType || '');
+    const label = `${escapeBoardText(f.filename)}　·　${formatFileSize(f.size)}`;
+    if (ct.startsWith('text/html')) {
+      return `<div class="approval-preview-block">
+        <p class="approval-preview-label">${workspaceFileIcon(ct)} ${label}</p>
+        <iframe class="approval-preview-frame" src="${fileUrl}&inline=1" loading="lazy" title="${escapeBoardText(f.filename)}"></iframe>
+      </div>`;
+    }
+    if (ct.startsWith('image/')) {
+      return `<div class="approval-preview-block">
+        <p class="approval-preview-label">${workspaceFileIcon(ct)} ${label}</p>
+        <img class="approval-preview-image" src="${fileUrl}&inline=1" alt="${escapeBoardText(f.filename)}" loading="lazy">
+      </div>`;
+    }
+    return `<div class="approval-preview-block">
+      <a class="approval-preview-file-link" href="${fileUrl}${ct === 'application/pdf' ? '&inline=1' : ''}" target="_blank" rel="noopener">
+        ${workspaceFileIcon(ct)} ${label}　↗
+      </a>
+    </div>`;
+  });
+  return `<div class="approval-preview">${blocks.join('')}</div>`;
+}
+
 function buildApprovalItemCardHtml(item) {
   const askHistoryHtml = (item.askNotes && item.askNotes.length)
     ? `<p class="approval-ask-history">您先前問過：${item.askNotes.map(a => escapeBoardText(a.note || '')).join('；')}</p>`
     : '';
+  const isDeliverableReview = item.kind === 'deliverable_review';
+  // V59：deliverable_review 沒有一定隸屬於某個正式任務（board 委派的子任務
+  // 也會走同一套成果待審流程），item.taskId 可能是 null，這裡分開處理避免
+  // 顯示成「來自任務中心・null」這種看起來像壞掉的文字。
+  const sourceTagHtml = item.taskId
+    ? `<p class="approval-tag is-task-linked">來自任務中心・${escapeBoardText(item.taskId)}　·　${formatApprovalTime(item.createdAt)}</p>`
+    : `<p class="approval-tag">${isDeliverableReview ? 'AI 專案工作區成果' : ''}　·　${formatApprovalTime(item.createdAt)}</p>`;
+  const bodyHtml = isDeliverableReview
+    ? buildDeliverablePreviewHtml(item)
+    : `<p class="approval-summary">${escapeBoardText(item.summary)}</p>`;
+  // V59：「再問清楚一點」是設計給「要不要開始做這一步」用的，成果都已經做完
+  // 存進 R2 了，沒有「繼續問下去」的對象，這裡只給核准／退回兩個按鈕。
+  const actionsHtml = isDeliverableReview
+    ? `<button type="button" class="btn-approve" data-act="approve" data-target="${item.id}">核准，發布到交付中心</button>
+       <button type="button" class="btn-reject" data-act="reject" data-target="${item.id}">退回，不發布</button>`
+    : `<button type="button" class="btn-approve" data-act="approve" data-target="${item.id}">核准，繼續執行</button>
+       <button type="button" class="btn-ask" data-act="ask" data-target="${item.id}">再問清楚一點</button>
+       <button type="button" class="btn-reject" data-act="reject" data-target="${item.id}">退回，跳過這步</button>`;
   return `
-        <div class="approval-card" data-dynamic="true" data-risk="mid" id="${item.id}">
+        <div class="approval-card" data-dynamic="true" data-risk="mid" data-kind="${item.kind || 'task-step'}" id="${item.id}">
           <div class="approval-top">
             <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
             <div>
               <p class="approval-case">${escapeBoardText(item.caseTitle)}</p>
-              <p class="approval-tag is-task-linked">來自任務中心・${escapeBoardText(item.taskId)}　·　${formatApprovalTime(item.createdAt)}</p>
+              ${sourceTagHtml}
             </div>
-            <span class="risk risk-mid" style="margin-left:auto;">需要裁示</span>
+            <span class="risk risk-mid" style="margin-left:auto;">${isDeliverableReview ? '待預覽核准' : '需要裁示'}</span>
           </div>
-          <p class="approval-summary">${escapeBoardText(item.summary)}</p>
+          ${bodyHtml}
           <div class="approval-who">
             <span class="ava ava-gm ava-sm" aria-hidden="true"><span class="ava-glyph">總</span></span>
             <span>${escapeBoardText(item.reason)}</span>
           </div>
           ${askHistoryHtml}
           <div class="approval-actions">
-            <button type="button" class="btn-approve" data-act="approve" data-target="${item.id}">核准，繼續執行</button>
-            <button type="button" class="btn-ask" data-act="ask" data-target="${item.id}">再問清楚一點</button>
-            <button type="button" class="btn-reject" data-act="reject" data-target="${item.id}">退回，跳過這步</button>
+            ${actionsHtml}
           </div>
           <p class="approval-resolved-note"></p>
         </div>`;
@@ -2190,7 +2240,14 @@ if (approvalListEl) {
             const cls = act === 'approve' ? 'ok' : 'no';
             note.className = `approval-resolved-note show ${cls}`;
             const prefix = act === 'approve' ? '✓ ' : '✕ ';
-            note.textContent = `${prefix}已${act === 'approve' ? '核准' : '退回'}，總經理會接著自動處理後續步驟（已存入後端歷史紀錄）`;
+            // V59：deliverable_review 卡片核准／退回，動的是「這個專案要不要
+            // 出現在交付中心」，不是任務進度，用跟 task-step 卡片一樣的
+            // 「總經理會接著自動處理後續步驟」會讓人誤以為還有後續流程在跑。
+            const isDeliverableCard = card.dataset.kind === 'deliverable_review';
+            const resultDetail = isDeliverableCard
+              ? (act === 'approve' ? '已發布到交付中心' : '已退回，不會出現在交付中心（檔案仍保留）')
+              : '總經理會接著自動處理後續步驟';
+            note.textContent = `${prefix}已${act === 'approve' ? '核准' : '退回'}，${resultDetail}（已存入後端歷史紀錄）`;
           }
           await loadApprovalList(); // 這張項目已經 resolved，重新讀一次會讓它從清單消失
         }

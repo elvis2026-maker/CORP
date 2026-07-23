@@ -229,6 +229,12 @@ const ORG_REGISTRY = [
         "nick": "· 小調",
         "nameEn": "Model Optimization Engineer",
         "fn": "評估並整合最新的 AI 模型，導入既有工具庫提升效能。"
+      },
+      {
+        "name": "整合部署工程師",
+        "nick": "· 小裝",
+        "nameEn": "Integration & Deployment Engineer",
+        "fn": "網站類任務收尾前，把前面每個步驟真正存檔的規格、UI 規範、技術方案讀出來，組裝成一組互相搭配、可以直接部署的完整檔案。"
       }
     ]
   },

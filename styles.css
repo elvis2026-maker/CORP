@@ -893,6 +893,83 @@
   .audit-log-item .audit-meta{color:var(--ink-faint); font-size:11px; margin:2px 0 0;}
   .audit-log-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
   .audit-log-status.is-error{color:var(--risk-high);}
+
+  /* V65：里程碑（任務卡片內） */
+  .tc-milestones{margin-top:14px; padding-top:12px; border-top:1px dashed var(--line);}
+  .tc-milestones-title{font-size:12px; font-weight:700; color:var(--ink); margin:0 0 8px;}
+  .tc-milestone-list{display:flex; flex-direction:column; gap:6px;}
+  .tc-milestone{
+    display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px;
+    background:var(--bg-soft, #f6f7fb); border:1px solid var(--line); font-size:12px;
+  }
+  .tc-milestone-toggle{
+    flex:0 0 auto; width:20px; height:20px; border-radius:50%; border:1.5px solid var(--line-strong);
+    background:var(--paper); cursor:pointer; font-size:11px; line-height:1; display:flex;
+    align-items:center; justify-content:center; color:var(--ink-faint); padding:0;
+  }
+  .tc-milestone.is-done .tc-milestone-toggle{background:var(--risk-low); border-color:var(--risk-low); color:#fff;}
+  .tc-milestone.is-overdue .tc-milestone-toggle{border-color:var(--risk-high); color:var(--risk-high);}
+  .tc-milestone-title{flex:1 1 auto; min-width:0; font-weight:600; color:var(--ink);}
+  .tc-milestone-due{flex:0 0 auto; color:var(--ink-faint); font-size:11px;}
+  .tc-milestone-state{flex:0 0 auto; font-size:11px; font-weight:600; color:var(--ink-faint);}
+  .tc-milestone.is-done .tc-milestone-state{color:var(--risk-low);}
+  .tc-milestone.is-overdue .tc-milestone-state{color:var(--risk-high);}
+
+  /* V65：客戶驗收與回饋（任務卡片內） */
+  .tc-feedback{margin-top:14px; padding:12px; border-radius:9px; background:var(--bg-soft, #f6f7fb); border:1px solid var(--line);}
+  .tc-feedback-title{font-size:12px; font-weight:600; color:var(--ink); margin:0 0 8px; line-height:1.6;}
+  .tc-feedback-buttons{display:flex; gap:8px; margin-bottom:8px;}
+  .tc-feedback-buttons button{
+    flex:1; padding:7px 10px; border-radius:8px; border:1px solid var(--line-strong);
+    background:var(--paper); font-size:12.5px; font-weight:600; cursor:pointer; font-family:inherit;
+  }
+  .tc-feedback-good:hover{border-color:var(--risk-low); color:var(--risk-low);}
+  .tc-feedback-bad:hover{border-color:var(--risk-high); color:var(--risk-high);}
+  .tc-feedback-comment-input{
+    width:100%; box-sizing:border-box; border-radius:8px; border:1px solid var(--line); padding:8px 10px;
+    font-size:12px; font-family:inherit; resize:vertical; background:var(--paper); color:var(--ink);
+  }
+  .tc-feedback-status{display:block; margin-top:6px; font-size:11px; color:var(--ink-faint);}
+  .tc-feedback-status.is-error{color:var(--risk-high);}
+  .tc-feedback.is-submitted{background:rgba(16,163,74,.06); border-color:rgba(16,163,74,.25);}
+  .tc-feedback-comment{font-size:12px; color:var(--ink-soft); margin:0 0 4px; line-height:1.6;}
+  .tc-feedback-time{font-size:11px; color:var(--ink-faint); margin:0;}
+  .task-done-feedback{
+    flex:0 0 auto; font-size:11px; padding:1px 7px; border-radius:999px; border:1px solid var(--line-strong);
+    color:var(--ink-faint);
+  }
+  .task-done-feedback.is-good{border-color:rgba(16,163,74,.35); background:rgba(16,163,74,.08);}
+  .task-done-feedback.is-bad{border-color:rgba(220,38,38,.3); background:rgba(220,38,38,.06);}
+
+  /* V65：部門知識庫 */
+  .knowledge-dept-chips{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
+  .knowledge-dept-chip{
+    padding:6px 12px; border-radius:999px; border:1px solid var(--line-strong); background:var(--paper);
+    font-size:12px; font-weight:600; color:var(--ink-soft); cursor:pointer; font-family:inherit;
+  }
+  .knowledge-dept-chip b{font-weight:700; color:var(--ink-faint); margin-left:2px;}
+  .knowledge-dept-chip:hover{border-color:var(--gm); color:var(--gm);}
+  .knowledge-dept-chip.is-active{background:var(--gm); border-color:var(--gm); color:#fff;}
+  .knowledge-dept-chip.is-active b{color:rgba(255,255,255,.8);}
+  .knowledge-list{display:flex; flex-direction:column; gap:8px;}
+  .knowledge-item{
+    display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border-radius:9px;
+    background:var(--bg-soft, #f6f7fb); border:1px solid var(--line); font-size:12px; line-height:1.6;
+  }
+  .knowledge-item .knowledge-badge{
+    flex:0 0 auto; font-weight:700; padding:2px 8px; border-radius:999px; font-size:11px;
+    background:rgba(90,90,220,.12); color:var(--violet); white-space:nowrap;
+  }
+  .knowledge-item .knowledge-body{flex:1 1 auto; min-width:0;}
+  .knowledge-item .knowledge-content{font-weight:500; color:var(--ink); margin:0; line-height:1.6;}
+  .knowledge-item .knowledge-meta{color:var(--ink-faint); font-size:11px; margin:3px 0 0;}
+  .knowledge-delete{
+    flex:0 0 auto; background:none; border:none; cursor:pointer; font-size:13px; padding:2px 4px;
+    opacity:.5; border-radius:6px;
+  }
+  .knowledge-delete:hover{opacity:1; background:rgba(220,38,38,.08);}
+  .knowledge-status{margin-top:10px; font-size:11.5px; color:var(--ink-faint);}
+  .knowledge-status.is-error{color:var(--risk-high);}
   .board-sync-status{margin-top:8px; font-size:11px; color:var(--ink-faint);}
   .board-sync-status.is-error{color:var(--risk-high);}
   .bc-demo-tag{

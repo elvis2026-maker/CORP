@@ -1195,6 +1195,123 @@ async function loadAuditLog() {
 }
 loadAuditLog();
 
+// ============================================================================
+// V65：部門知識庫（唯讀瀏覽＋刪除單筆）——先讀 /dept-knowledge-list（不帶
+// deptId）拿到每個部門的累積筆數，畫成一排可以點的部門標籤；點下去才真的讀
+// 那個部門完整的知識庫清單。不會一次把每個部門的知識庫全部撈回來——平常真正
+// 需要細看的通常只有一兩個部門，沒必要每次都整批載入。
+// ============================================================================
+let knowledgeEntriesCache = [];
+const KNOWLEDGE_TYPE_LABEL = {
+  client_feedback_good: '😊 董事長回饋・滿意',
+  client_feedback_bad: '😟 董事長回饋・不滿意',
+  qa_rework: '🔍 品保退件教訓',
+};
+function buildKnowledgeEntryHtml(deptId, entry) {
+  const typeKey = entry.type === 'client_feedback' ? `client_feedback_${entry.rating === 'good' ? 'good' : 'bad'}` : entry.type;
+  const typeLabel = KNOWLEDGE_TYPE_LABEL[typeKey] || '📌 經驗';
+  const when = entry.createdAt ? new Date(entry.createdAt).toLocaleString('zh-TW', { hour12: false }) : '';
+  return `
+      <div class="knowledge-item">
+        <span class="knowledge-badge">${typeLabel}</span>
+        <div class="knowledge-body">
+          <p class="knowledge-content">${escapeBoardText(entry.content)}</p>
+          <p class="knowledge-meta">${entry.taskTitle ? escapeBoardText(entry.taskTitle) + ' · ' : ''}${when}</p>
+        </div>
+        <button type="button" class="knowledge-delete" data-knowledge-delete="${deptId}" data-knowledge-entry="${entry.id}" title="刪除這筆紀錄">🗑</button>
+      </div>`;
+}
+function renderKnowledgeList(deptId, entries) {
+  const list = document.getElementById('knowledgeList');
+  const status = document.getElementById('knowledgeStatus');
+  if (!list || !status) return;
+  if (!deptId) {
+    list.innerHTML = '';
+    status.textContent = '點上面的部門標籤，看那個部門累積了哪些知識庫紀錄。';
+    status.classList.remove('is-error');
+    return;
+  }
+  if (!entries.length) {
+    list.innerHTML = '';
+    status.textContent = '這個部門目前還沒有累積任何知識庫紀錄——品保部退件、或董事長提交驗收回饋之後才會開始累積。';
+    status.classList.remove('is-error');
+    return;
+  }
+  list.innerHTML = entries.map(e => buildKnowledgeEntryHtml(deptId, e)).join('');
+  status.textContent = `共 ${entries.length} 筆（最近 5 筆會實際用在這個部門下次執行任務的提示裡）`;
+  status.classList.remove('is-error');
+}
+async function loadDeptKnowledgeSummary() {
+  const chipsEl = document.getElementById('knowledgeDeptChips');
+  const status = document.getElementById('knowledgeStatus');
+  const base = apiBase();
+  if (!base || !chipsEl) return;
+  try {
+    const res = await fetch(`${base}/dept-knowledge-list`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    const summary = data.summary || {};
+    const activeId = chipsEl.querySelector('.knowledge-dept-chip.is-active')?.dataset.knowledgeDept;
+    chipsEl.innerHTML = Object.entries(summary).map(([deptId, info]) => `
+      <button type="button" class="knowledge-dept-chip${deptId === activeId ? ' is-active' : ''}" data-knowledge-dept="${deptId}">${escapeBoardText(info.deptName)} <b>${info.count}</b></button>`).join('');
+  } catch (err) {
+    console.error('讀取知識庫彙總失敗：', err);
+    if (status) { status.textContent = '目前連不上知識庫服務，稍後重新整理頁面再試一次。'; status.classList.add('is-error'); }
+  }
+}
+async function loadDeptKnowledgeDetail(deptId) {
+  const status = document.getElementById('knowledgeStatus');
+  const base = apiBase();
+  if (!base) return;
+  if (status) { status.textContent = '載入中…'; status.classList.remove('is-error'); }
+  try {
+    const res = await fetch(`${base}/dept-knowledge-list?deptId=${encodeURIComponent(deptId)}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    knowledgeEntriesCache = Array.isArray(data.entries) ? data.entries : [];
+    renderKnowledgeList(deptId, knowledgeEntriesCache);
+    document.querySelectorAll('.knowledge-dept-chip').forEach(chip => {
+      chip.classList.toggle('is-active', chip.dataset.knowledgeDept === deptId);
+    });
+  } catch (err) {
+    console.error('讀取部門知識庫失敗：', err);
+    if (status) { status.textContent = `讀取失敗：${err.message || err}`; status.classList.add('is-error'); }
+  }
+}
+document.getElementById('knowledgeDeptChips')?.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-knowledge-dept]');
+  if (!chip) return;
+  loadDeptKnowledgeDetail(chip.dataset.knowledgeDept);
+});
+document.getElementById('knowledgeList')?.addEventListener('click', async (e) => {
+  const delBtn = e.target.closest('[data-knowledge-delete]');
+  if (!delBtn) return;
+  const deptId = delBtn.dataset.knowledgeDelete;
+  const entryId = delBtn.dataset.knowledgeEntry;
+  if (!confirm('確定要刪除這筆知識庫紀錄嗎？刪除後無法復原。')) return;
+  const base = apiBase();
+  if (!base) return;
+  delBtn.disabled = true;
+  try {
+    const res = await fetch(`${base}/dept-knowledge-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+      body: JSON.stringify({ deptId, entryId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+    knowledgeEntriesCache = knowledgeEntriesCache.filter(e => e.id !== entryId);
+    renderKnowledgeList(deptId, knowledgeEntriesCache);
+    loadDeptKnowledgeSummary(); // 筆數變了，彙總標籤上的數字要跟著更新
+    loadAuditLog();
+  } catch (err) {
+    console.error('刪除知識庫紀錄失敗：', err);
+    alert(`刪除失敗：${err.message || err}`);
+    delBtn.disabled = false;
+  }
+});
+loadDeptKnowledgeSummary();
+
 // ---------------- V23：部門即時看板改為串接真實任務資料庫 ----------------
 // org-data.js 裡的 board 內容原本是固定寫死的示範資料（task／log／progress
 // 永遠一樣）。這裡改成頁面載入時去讀 Worker 的 /board-state：如果某個部門已經
@@ -1731,6 +1848,57 @@ function applyWorkflowEditorSelectValues(container, editableSteps) {
   });
 }
 
+// V65：里程碑一列的渲染——點擊圖示可以手動切換達成／未達成（呼叫
+// /task-milestone-update），逾期與否直接讀後端 computeTaskDerivedFields()
+// 算好的 isOverdue，前端不用自己重算一次時間判斷。
+function buildMilestoneRowHtml(taskId, m) {
+  const isDone = m.status === 'done';
+  const isOverdue = !!m.isOverdue;
+  const stateClass = isDone ? 'is-done' : (isOverdue ? 'is-overdue' : 'is-pending');
+  const stateLabel = isDone ? '已達成' : (isOverdue ? '已逾期' : '待達成');
+  const dueText = m.dueDate ? formatTaskTime(m.dueDate).split(' ')[0] : '';
+  return `
+    <div class="tc-milestone ${stateClass}">
+      <button type="button" class="tc-milestone-toggle" data-milestone-toggle="${taskId}" data-milestone-id="${m.id}" data-milestone-status="${m.status}" title="點擊切換達成狀態">${isDone ? '✓' : '○'}</button>
+      <span class="tc-milestone-title">${escapeBoardText(m.title)}</span>
+      ${dueText ? `<span class="tc-milestone-due">目標 ${dueText}</span>` : ''}
+      <span class="tc-milestone-state">${stateLabel}</span>
+    </div>`;
+}
+function buildMilestonesHtml(task) {
+  if (!Array.isArray(task.milestones) || !task.milestones.length) return '';
+  return `
+    <div class="tc-milestones">
+      <p class="tc-milestones-title">🚩 里程碑</p>
+      <div class="tc-milestone-list">${task.milestones.map(m => buildMilestoneRowHtml(task.id, m)).join('')}</div>
+    </div>`;
+}
+
+// V65：客戶驗收與回饋——只有任務真的做完（status==='done'）才顯示。已經提交過
+// 就顯示唯讀的回饋內容，還沒提交就顯示「滿意／不滿意」按鈕＋選填意見欄。
+function buildTaskFeedbackHtml(task) {
+  if (task.status !== 'done') return '';
+  if (task.feedback) {
+    const ratingLabel = task.feedback.rating === 'good' ? '😊 滿意' : '😟 不滿意';
+    return `
+      <div class="tc-feedback is-submitted">
+        <p class="tc-feedback-title">✅ 驗收回饋：${ratingLabel}</p>
+        ${task.feedback.comment ? `<p class="tc-feedback-comment">${escapeBoardText(task.feedback.comment)}</p>` : ''}
+        <p class="tc-feedback-time">${formatTaskTime(task.feedback.submittedAt)}・已同步給相關部門的知識庫</p>
+      </div>`;
+  }
+  return `
+    <div class="tc-feedback" data-feedback-form="${task.id}">
+      <p class="tc-feedback-title">🎯 這個任務的成果，您驗收滿意嗎？（回饋會同步給相關部門的知識庫，下次接到類似任務會參考）</p>
+      <div class="tc-feedback-buttons">
+        <button type="button" class="tc-feedback-good" data-feedback-rating="good" data-feedback-task="${task.id}">😊 滿意</button>
+        <button type="button" class="tc-feedback-bad" data-feedback-rating="bad" data-feedback-task="${task.id}">😟 不滿意</button>
+      </div>
+      <textarea class="tc-feedback-comment-input" placeholder="想留下具體意見嗎？（選填）" maxlength="500" rows="2" data-feedback-comment="${task.id}"></textarea>
+      <span class="tc-feedback-status" data-feedback-status-for="${task.id}"></span>
+    </div>`;
+}
+
 function buildTaskCardHtml(task) {
   const meta = TASK_STATUS_META[task.status] || { dot: 's-idle', label: task.status };
   const doneCount = task.steps.filter(s => s.status === 'done').length;
@@ -1771,6 +1939,8 @@ function buildTaskCardHtml(task) {
         </summary>
         ${lastErrorHtml}
         <div class="tc-steps">${task.steps.map(buildTaskStepHtml).join('')}</div>
+        ${buildMilestonesHtml(task)}
+        ${buildTaskFeedbackHtml(task)}
         <div class="tc-workflow-editor" id="wf-editor-${task.id}" hidden></div>
         <div class="tc-actions">
           <button type="button" class="tc-advance" data-task-advance="${task.id}" ${canAdvance ? '' : 'disabled'}>推進下一步</button>
@@ -1791,12 +1961,18 @@ function buildTaskFadedItemHtml(task) {
   const meta = TASK_STATUS_META[task.status] || { dot: 's-idle', label: task.status };
   const doneCount = task.steps.filter(s => s.status === 'done').length;
   const total = task.steps.length || 1;
+  // V65：已完成任務即使收合成一行淡化摘要，也讓「有沒有驗收回饋」一眼看得到，
+  // 不用展開（其實這裡也沒有展開功能）才知道要不要去補一個回饋。
+  const feedbackBadge = task.feedback
+    ? `<span class="task-done-feedback ${task.feedback.rating === 'good' ? 'is-good' : 'is-bad'}">${task.feedback.rating === 'good' ? '😊' : '😟'}</span>`
+    : (task.status === 'done' ? `<span class="task-done-feedback is-pending" title="還沒有驗收回饋">未驗收</span>` : '');
   return `
       <div class="task-done-item" data-status="${task.status}">
         <span class="stat-dot ${meta.dot}"></span>
         <span class="task-done-id">${escapeBoardText(task.id)}</span>
         <span class="task-done-item-title">${escapeBoardText(task.title)}</span>
         <span class="task-done-meta">${doneCount}/${total}・${meta.label}・${formatTaskTime(task.updatedAt || task.createdAt)}</span>
+        ${feedbackBadge}
       </div>`;
 }
 const TASK_DONE_COLLAPSE_COUNT = 3;
@@ -2039,6 +2215,66 @@ if (taskGridEl) {
         console.error('儲存工作流程失敗：', err);
         if (statusEl) { statusEl.textContent = `儲存失敗：${err.message || err}`; statusEl.classList.add('is-error'); }
         saveBtn.disabled = false;
+      }
+      return;
+    }
+
+    // ---- V65：里程碑手動切換 ----
+    const msToggleBtn = e.target.closest('[data-milestone-toggle]');
+    if (msToggleBtn) {
+      e.preventDefault();
+      const taskId = msToggleBtn.dataset.milestoneToggle;
+      const milestoneId = msToggleBtn.dataset.milestoneId;
+      const nextStatus = msToggleBtn.dataset.milestoneStatus === 'done' ? 'pending' : 'done';
+      const base = apiBase();
+      if (!base) return;
+      msToggleBtn.disabled = true;
+      try {
+        const res = await fetch(`${base}/task-milestone-update`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+          body: JSON.stringify({ taskId, milestoneId, status: nextStatus }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+        await loadTaskState(); // 整個重畫任務卡片，里程碑狀態會反映最新結果
+        loadAuditLog();
+      } catch (err) {
+        console.error('里程碑更新失敗：', err);
+        alert(`里程碑更新失敗：${err.message || err}`);
+        msToggleBtn.disabled = false;
+      }
+      return;
+    }
+
+    // ---- V65：客戶驗收與回饋提交 ----
+    const feedbackBtn = e.target.closest('[data-feedback-rating]');
+    if (feedbackBtn) {
+      e.preventDefault();
+      const taskId = feedbackBtn.dataset.feedbackTask;
+      const rating = feedbackBtn.dataset.feedbackRating;
+      const formEl = feedbackBtn.closest('[data-feedback-form]');
+      const commentEl = formEl ? formEl.querySelector('[data-feedback-comment]') : null;
+      const statusEl = formEl ? formEl.querySelector('[data-feedback-status-for]') : null;
+      const comment = commentEl ? commentEl.value.trim() : '';
+      const base = apiBase();
+      if (!base) return;
+      formEl?.querySelectorAll('button').forEach(b => { b.disabled = true; });
+      if (statusEl) { statusEl.textContent = '送出中…'; statusEl.classList.remove('is-error'); }
+      try {
+        const res = await fetch(`${base}/task-feedback`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+          body: JSON.stringify({ taskId, rating, comment }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+        await loadTaskState(); // 這個任務卡片會換成「已提交」的唯讀回饋顯示
+        loadAuditLog();
+      } catch (err) {
+        console.error('提交驗收回饋失敗：', err);
+        if (statusEl) { statusEl.textContent = `提交失敗：${err.message || err}`; statusEl.classList.add('is-error'); }
+        formEl?.querySelectorAll('button').forEach(b => { b.disabled = false; });
       }
       return;
     }

@@ -1,0 +1,17 @@
+{
+  "name": "elvis-corp-worker",
+  "private": true,
+  "description": "艾維斯萬能事務所 · 董事長指揮中心 — Cloudflare Worker 依賴宣告。V67 起這支 Worker 第一次依賴真正的第三方 npm 套件（docx／pptxgenjs／xlsx，用來真的產生 Word／PowerPoint／Excel 檔案），需要先在這個資料夾跑一次「npm install」，之後每次部署都要用「npx wrangler deploy」（不能再直接把 cloudflare-worker.js 貼到 Cloudflare 網頁編輯器），詳細步驟見 README.md「V67 設定方法」那一節。",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "docx": "^9.5.1",
+    "pptxgenjs": "^4.0.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "wrangler": "^4.4.0"
+  }
+}

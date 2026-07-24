@@ -1,9 +1,35 @@
-# ELVIS-CORP-V66
+# ELVIS-CORP-V67
 
-艾維斯萬能事務所 · 董事長指揮中心 — V66
+艾維斯萬能事務所 · 董事長指揮中心 — V67
 
 ## 版次紀錄
 
+### V67.0 — 2026.07.23
+接續 V66：建置 docx（Word）、pptxgenjs（PPT）、xlsx（Excel），並先查證能不能在 Cloudflare Workers 打包執行。**這是這個專案從 V20 以來第一次真正依賴第三方 npm 套件、也是第一次「不能」單純把 `cloudflare-worker.js` 貼到 Cloudflare 網頁編輯器部署**——請務必先看下面「部署方式的重大改變」再動手，否則貼上舊流程會直接部署失敗。
+
+**技術查證結論（部署前用網路搜尋查證，不是憑印象猜測）**
+- **docx**：官方文件明確寫「zero external runtime dependencies」，並且明確支援 Node／瀏覽器／**serverless** 環境，是三個套件裡相容性最有把握的一個。
+- **pptxgenjs**：官方文件**明確列出 Cloudflare Workers 是官方支援的部署目標**，零執行期依賴，建議用 ESM 版本以獲得最好的 Workers 相容性。
+- **exceljs**：查到 GitHub 上有一個**至今尚未解決**的 issue（exceljs/exceljs#2759），是社群在正式要求「支援邊緣運算環境（Cloudflare／Vercel）」，內容明確指出 exceljs 依賴 Node.js 的 `fs`／`os`／`Buffer`／`crypto`——**這個查證結果跟原本題目指定的「exceljs」不同，這裡改用相容性有官方佐證的替代方案**。
+- **xlsx（SheetJS）**：查到 **SheetJS 官方就有一份 Cloudflare Workers 的部署示範文件**，附完整範例程式碼（`import XLSX from "xlsx"`，直接在 `fetch` handler 裡呼叫 `XLSX.write()` 產生檔案），是 Excel 這塊更有把握的選擇。**這一版用 xlsx（SheetJS）取代原本指定的 exceljs**，理由就是上面這個查證結果。
+
+**新增三個工具：`save_docx`／`save_pptx`／`save_xlsx`**
+- 三個工具都是「AI 角色描述結構化內容，系統用函式庫實際組裝成合法的 OOXML 二進位格式」——跟 V54 的 `save_image`（AI 給文字描述，Worker 真的呼叫服務生圖）、V56 的 `save_zip`（AI 給檔案內容，Worker 真的手刻 DEFLATE 壓縮）是同一個設計哲學：AI 只做它做得到的事（描述結構化內容），真正的二進位組裝交給程式碼或函式庫。
+- `save_docx`：`blocks` 陣列描述段落／標題（1～3 階）／條列／表格，用 `docx` 套件的 `Document`／`Paragraph`／`Table` 組出真正的 Word 文件。
+- `save_pptx`：`slides` 陣列描述每張投影片的標題與重點條列（可選演講者備忘稿），用 `pptxgenjs` 組出真正的簡報。
+- `save_xlsx`：`sheets` 陣列描述每個工作表的名稱與二維陣列列資料，用 `xlsx`（SheetJS）組出真正的試算表。
+- 三個工具共用同一套「存進 R2、更新專案清單、寫審計紀錄」的邏輯（`saveGeneratedOfficeFile()`），沿用 V58 Tool Router 的重試機制（R2／KV 暫時性失敗會自動重試）。
+- `save_pdf` 的說明同步更新：現在只剩它是唯一沒有真實生成路徑的格式，角色 prompt 也同步更新，引導優先使用這三個新工具。
+
+**部署方式的重大改變，請務必詳讀「V67 設定方法」**
+- 因為 `cloudflare-worker.js` 現在 `import` 了三個真正的 npm 套件，瀏覽器裡的 Cloudflare 網頁編輯器沒有能力解析這種語法（它只能處理單一、不依賴外部套件的檔案）——**從這一版起，每一次部署都必須用命令列的 `npx wrangler deploy`，不能再直接複製貼上部署**。
+- 好消息是：如果您已經照 V43「設定方法」裝過 Node.js／Wrangler（當時是選擇性的，為了 Durable Objects），這次只是多一個 `npm install` 的動作，部署指令完全一樣；`wrangler deploy` 本身就會自動把 `cloudflare-worker.js` 跟三個套件的程式碼打包成一份，不需要另外手動跑 esbuild 或其他打包工具。
+- 如果您還沒裝過 Node.js／Wrangler，這次沒有「暫時不想切換就跳過」這個選項了（V43 的 Durable Object 是選擇性功能，這次的三個新工具是直接寫進主檔案的真實依賴，沒有相容退路）——完整步驟見「V67 設定方法」。
+- 新增 `package.json`（宣告 docx／pptxgenjs／xlsx 這三個依賴），`wrangler.jsonc` 新增 `compatibility_flags: ["nodejs_compat"]`（這幾個套件內部可能用到 Node.js 內建模組的語意，這個旗標讓 Workers 提供相容實作）。
+
+**驗證方式，請務必讀完這段——這次的「沒辦法驗證」比之前任何一版都更關鍵：** 這個沙箱環境**完全沒有對外網路存取權限**（連 npm registry 都連不上，實測 `npm install docx` 回應 403），所以這次**沒有辦法**：① 真的執行 `npm install` 安裝這三個套件；② 用 esbuild／wrangler 實際打包 `cloudflare-worker.js`；③ 部署到真正的 Cloudflare Workers 環境；④ 驗證 `save_docx`／`save_pptx`／`save_xlsx` 產生的位元組是不是合法、真的能被 Word／PowerPoint／Excel 打開的檔案。這三個工具的程式碼是依據**官方文件記載的 API 用法**寫的，`toolSaveDocx`／`toolSavePptx`／`toolSaveXlsx` 內部「參數驗證、結構分派邏輯」這部分用假的函式庫介面做了獨立測試（10 項斷言，全部通過，見下方測試檔案），但這**只驗證了膠水程式碼本身的邏輯正確，沒有、也不可能驗證三個真實函式庫在 Cloudflare Workers 執行環境下的實際行為**。部署後第一件事，強烈建議您實際請每個工具產生一份檔案、下載下來，用真正的 Word／PowerPoint／Excel 打開確認——如果打不開或報錯，麻煩把 Cloudflare Logs 裡的錯誤訊息貼給我，最常見的可能原因會是：某個套件內部用到的 Node.js API `nodejs_compat` 旗標沒有涵蓋到（需要看實際錯誤訊息判斷）、或是套件本身在 Workers 的 V8 isolate 環境下有官方文件沒提到的邊界情況。
+
+---
 ### V66.0 — 2026.07.22
 接續 V65：新增一個性質類似 V62「總經理整合步驟」、但目的不同的機制——**工程整合組裝**。V62 解決的是「決策層面」沒人整合（總經理看過所有步驟的真實產出，做出最終決策），這一版解決的是「技術層面」沒人整合：網站類任務裡，設計部給了 UI 規範、產品部給了功能規劃、工程部給了技術方案，各自都存了檔案，但從來沒有人真的把這些東西讀出來、兜成一組互相搭配、能直接部署的完整成品。只改 `cloudflare-worker.js`、`org-data.js` 兩個檔案（`org-data.js` 只是同步新增一個角色到組織架構顯示資料，不影響邏輯）。
 
@@ -1365,3 +1391,34 @@ org-data.js     → 部門與角色資料（即 ORG_REGISTRY 的正式版）
 **之後怎麼辦：** 只要不是新增或砍掉 Durable Object 類別本身，之後修改 `cloudflare-worker.js` 裡的程式邏輯，一樣可以照舊回到 Cloudflare 網頁編輯器貼上、按 Deploy，不需要每次都重新跑 Wrangler 命令列——`wrangler.jsonc` 只有在「類別結構本身要變」的情況下才需要再跑一次 `wrangler deploy`。
 
 **如果暫時不想切換：** 什麼都不用做，把新的 `cloudflare-worker.js` 貼到網頁編輯器部署即可（跟以前完全一樣的流程），網站會自動偵測到沒有 `AI_COMPANY` 綁定，繼續使用原本的 KV 直連模式，功能不受影響。
+
+## V67 設定方法：docx／pptxgenjs／xlsx（這次沒有「暫時不想切換」的選項）
+
+**跟 V43 不一樣，這一節不是選擇性的。** `cloudflare-worker.js` 從這一版起在檔案最開頭直接 `import` 了三個真正的 npm 套件，網頁編輯器完全沒辦法處理這種程式碼——如果您把這版的 `cloudflare-worker.js` 直接複製貼到 Cloudflare 網頁編輯器，會直接部署失敗（因為編輯器裡沒有 `docx`／`pptxgenjs`／`xlsx` 這幾個套件的程式碼可以參照）。之後每次更新（不只是這次），都需要用命令列部署。
+
+**您需要準備：** 一台可以裝軟體的電腦、大約 10～20 分鐘（如果 V43 已經裝過 Node.js／Wrangler，可以跳過步驟 1～3，大約 5 分鐘）。
+
+1. **安裝 Node.js**（如果還沒裝過）：到 [nodejs.org](https://nodejs.org) 下載「LTS」版本安裝。
+2. **打開終端機／命令提示字元**，切換到這次下載的資料夾（裡面要有 `cloudflare-worker.js`、`wrangler.jsonc`、`package.json` 這三個檔案）：
+   ```
+   cd 桌面/ELVIS-CORP-V67
+   ```
+3. **登入 Cloudflare**（如果 V43 已經登入過，這步可以跳過）：
+   ```
+   npx wrangler login
+   ```
+4. **安裝這次新增的三個套件**（這是這個專案第一次需要這個動作）：
+   ```
+   npm install
+   ```
+   跑完之後，資料夾裡會多出一個 `node_modules` 資料夾（裝著 docx／pptxgenjs／xlsx 三個套件的程式碼）跟一個 `package-lock.json`（記錄實際安裝的版本號，之後 `npm install` 會照這份鎖定的版本裝，避免每次版本不一樣）——這兩個東西不用去動它，也不需要理解裡面在放什麼。
+5. **確認 `wrangler.jsonc` 裡的設定還是對的**：`name`／`kv_namespaces`／`r2_buckets` 這幾個欄位如果 V43 已經填過，維持原樣即可；這次新增的 `compatibility_flags: ["nodejs_compat"]` 已經幫您寫好了，不用自己加。
+6. **部署：**
+   ```
+   npx wrangler deploy
+   ```
+   這個指令會自動把 `cloudflare-worker.js` 跟三個套件的程式碼打包成一份完整檔案再上傳，不需要另外手動跑 esbuild 或其他打包工具——「打包」這件事完全是 `wrangler deploy` 自己內建處理的，您不需要理解打包的細節，只要這個指令跑完沒有紅字錯誤，就代表部署成功了。
+7. **確認密鑰還在**：到 Dashboard 的 Settings → Variables and Secrets 確認一下之前設定的密鑰都還在（通常命令列部署不會動到既有的環境變數，但保險起見看一眼）。
+8. **實際測試三個新工具**：這一步比平常的「跟總經理說句話確認一切正常」更重要——請總經理指派一個網站類、包含撰寫文件／簡報／試算表的任務，等角色實際呼叫 `save_docx`／`save_pptx`／`save_xlsx` 存檔後，到交付中心把檔案下載下來，**用真正的 Microsoft Word／PowerPoint／Excel（或 Google 文件／簡報／試算表這類相容軟體）打開確認**。如果某個檔案打不開或報錯，麻煩把 Cloudflare Dashboard 的 Logs 頁面裡對應的錯誤訊息複製給我，這樣才能判斷是哪個套件在 Workers 環境下踩到什麼問題。
+
+**如果您完全沒有能力／意願安裝 Node.js 跑命令列：** 這次沒有「維持原本網頁編輯器流程」的退路——如果不想切換部署方式，可以先不更新到 V67，繼續使用 V66 的 `cloudflare-worker.js`（V66 沒有這三個新工具，但其餘功能都正常運作），等準備好再回來升級。

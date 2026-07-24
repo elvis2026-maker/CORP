@@ -16,12 +16,25 @@
 // 編輯器貼上、按 Deploy，不需要每次都重新跑命令列。詳細步驟都寫在 README.md
 // 的「V43 設定方法」那一節，這裡只放設定檔本身。
 //
+// V67 更新：上面「之後可以回到網頁編輯器貼上」這件事，從 V67 起不再成立
+// ——因為 cloudflare-worker.js 現在會 import 三個真正的 npm 套件（docx／
+// pptxgenjs／xlsx，用來產生真正的 Word／PowerPoint／Excel 檔案），網頁編輯器
+// 沒有能力解析這種語法，之後每一次部署都必須用 `npx wrangler deploy`（它會
+// 自動把 cloudflare-worker.js 跟三個套件的程式碼打包成一份，不需要另外手動
+// 跑 esbuild）。詳細步驟見 README.md「V67 設定方法」那一節。
+//
 // name 這一行請改成您 Cloudflare Dashboard 上，這支 Worker 目前實際的名稱
 // （通常就是網址 https://「這裡這一段」.你的帳號.workers.dev 裡的那一段）。
 {
   "name": "elvis-gm-api",
   "main": "cloudflare-worker.js",
   "compatibility_date": "2026-07-01",
+  // V67：docx／pptxgenjs／xlsx 這幾個套件內部可能會用到 Node.js 的內建模組
+  // （例如 Buffer、stream 這類語意），Cloudflare Workers 預設的執行環境沒有
+  // 這些——這個旗標讓 Workers 提供這些 Node.js 內建模組的相容實作。沒有這個
+  // 旗標，這幾個套件很可能在執行期丟出「XXX is not defined」這類錯誤（不是
+  // 部署失敗，是部署成功但實際呼叫工具時才會出錯）。
+  "compatibility_flags": ["nodejs_compat"],
   // ---- Durable Objects：「AI Company」的核心 Runtime ----
   // binding 的名稱（AI_COMPANY）要跟 cloudflare-worker.js 裡讀取
   // env.AI_COMPANY 的名字完全一樣；class_name 要跟程式碼裡
